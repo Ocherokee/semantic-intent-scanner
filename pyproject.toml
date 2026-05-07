@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semantic-intent-scanner"
+version = "0.1.0"
+description = "Invariant-grounded semantic evaluation for AI agent skill files"
+readme = "README.md"
+license = { text = "AGPL-3.0" }
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.25.0",
+]
+
+[project.scripts]
+semantic-intent = "scanner.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Ocherokee/semantic-intent-scanner"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scanner*"]
