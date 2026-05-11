@@ -112,7 +112,7 @@ def render_json_report(
 ) -> str:
     report = {
         "scanner": "semantic-intent-scanner",
-        "version": "0.1.0",
+        "version": "0.3.0",
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "file": skill_path,
         "overall_risk": results.get("overall_risk"),
@@ -126,3 +126,82 @@ def render_json_report(
         ),
     }
     return json.dumps(report, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Directory audit report
+# ---------------------------------------------------------------------------
+
+def render_directory_report(
+    dir_results: dict[str, Any],
+    semantic_results: dict[str, Any] | None,
+    colorize: bool = True,
+) -> str:
+    lines = []
+    dir_risk = dir_results.get("overall_directory_risk", "low")
+    suspicious_files = dir_results.get("suspicious_files", [])
+    config_findings = dir_results.get("config_findings", [])
+
+    lines.append("")
+    lines.append(f"{BOLD}Semantic Intent Scanner — Directory Audit{RESET}" if colorize else "Semantic Intent Scanner — Directory Audit")
+    lines.append(f"Directory: {dir_results.get('directory', '?')}")
+    lines.append(f"Timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
+    lines.append("")
+    lines.append(f"Directory Risk: {_risk_label(dir_risk, colorize)}")
+    lines.append("")
+
+    # Suspicious files
+    if suspicious_files:
+        lines.append(f"Suspicious files found ({len(suspicious_files)}):")
+        lines.append("")
+        for f in suspicious_files:
+            risk = f.get("risk", "medium")
+            risk_str = _risk_label(risk, colorize)
+            lines.append(f"  {f.get('path', '?')} — {risk_str}")
+            lines.append(f"     Type:   {f.get('type', '?')}")
+            lines.append(f"     Reason: {f.get('reason', '')}")
+            patterns = f.get("dangerous_patterns", [])
+            if patterns:
+                categories = list({p["category"] for p in patterns})
+                lines.append(f"     Patterns detected: {', '.join(categories)}")
+            lines.append("")
+    else:
+        lines.append("No suspicious files detected in skill directory.")
+        lines.append("")
+
+    # Config findings
+    if config_findings:
+        lines.append(f"Config file findings ({len(config_findings)}):")
+        lines.append("")
+        for c in config_findings:
+            risk = c.get("risk", "low")
+            risk_str = _risk_label(risk, colorize)
+            lines.append(f"  {c.get('path', '?')} — {risk_str}")
+            lines.append(f"     {c.get('reason', '')}")
+            dangerous = c.get("dangerous_settings", [])
+            if dangerous:
+                lines.append(f"     Dangerous settings: {', '.join(dangerous)}")
+            lines.append("")
+
+    # Semantic evaluation summary if present
+    if semantic_results:
+        sem_risk = semantic_results.get("overall_risk", "low")
+        violations = semantic_results.get("violations", [])
+        lines.append("─" * 60)
+        lines.append("")
+        lines.append(f"Semantic Evaluation (SKILL.md): {_risk_label(sem_risk, colorize)}")
+        if violations:
+            lines.append(f"{len(violations)} invariant violation(s) detected — run file scan for details.")
+        else:
+            lines.append("No invariant violations detected in instruction file.")
+        lines.append("")
+
+    lines.append("─" * 60)
+    lines.append(
+        "Directory audit checks non-instruction attack surfaces: test files, "
+        "config files, and bundled executables. It does not replace semantic "
+        "evaluation of instruction content."
+    )
+    lines.append("")
+
+    return "\n".join(lines)
