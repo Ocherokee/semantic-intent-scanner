@@ -80,9 +80,15 @@ def render_terminal_report(
 
             lines.append(f"  {inv_id}: {inv_name} — {verdict_str} (confidence: {confidence:.0%})")
             if flagged:
-                lines.append(f"     Flagged: \"{flagged}\"")
+                lines.append(f"     Flagged:   \"{flagged}\"")
             if reasoning:
-                lines.append(f"     Reason:  {reasoning}")
+                lines.append(f"     Reason:    {reasoning}")
+            mechanisms = v.get("mechanism_failure", [])
+            bridge = v.get("mechanism_bridge", "")
+            if mechanisms:
+                lines.append(f"     Mechanism: {', '.join(mechanisms)}")
+            if bridge:
+                lines.append(f"     Why:       {bridge}")
             lines.append("")
 
     lines.append("")

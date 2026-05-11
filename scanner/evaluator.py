@@ -14,6 +14,7 @@ from typing import Any
 import anthropic
 
 from .invariants import INVARIANTS
+from .substrate import get_bridge_for_invariant, get_mechanisms_for_invariant
 
 # ---------------------------------------------------------------------------
 # Prompt template
@@ -200,6 +201,8 @@ def aggregate_results(chunk_results: list[dict]) -> dict[str, Any]:
                 existing = violations.get(inv_id)
                 # Keep the highest-confidence finding per invariant
                 if not existing or confidence > existing.get("confidence", 0):
+                    mechanisms = get_mechanisms_for_invariant(inv_id)
+                    bridge = get_bridge_for_invariant(inv_id)
                     violations[inv_id] = {
                         "invariant_id": inv_id,
                         "verdict": verdict,
@@ -208,6 +211,8 @@ def aggregate_results(chunk_results: list[dict]) -> dict[str, Any]:
                         "reasoning": inv_result.get("reasoning", ""),
                         "chunk_index": chunk.get("chunk_index", 0),
                         "chunk_excerpt": chunk.get("chunk_text", "")[:200],
+                        "mechanism_failure": [m["name"] for m in mechanisms],
+                        "mechanism_bridge": bridge,
                     }
 
     # Overall risk = worst chunk risk
