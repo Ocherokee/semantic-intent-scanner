@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semantic-intent-scanner"
+version = "0.1.0"
+description = "Invariant-grounded semantic evaluation for AI agent skill files."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic",
+]
+
+[project.scripts]
+semantic-intent = "scanner.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["scanner*"]
