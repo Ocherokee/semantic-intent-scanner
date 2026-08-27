@@ -55,21 +55,25 @@ def audit_llms_txt(
     the SSRF-hardened :func:`scanner.remote_fetch.guarded_fetch`.
 
     Returns a dict shaped like ``directory_audit.audit_directory``:
-    ``{surface, source, documents[], findings[], overall_risk}``.
+    ``{surface, source, documents[], retrieved, findings[], overall_risk}``.
+    ``retrieved`` is the count of candidate documents that were actually
+    served (HTTP 200, no error) — a caller uses it to tell "scanned and
+    found nothing" apart from "nothing could be fetched".
     """
     registry = registry or RegistryClient()
     fetch = fetch or guarded_fetch
 
     outcomes = [fetch(url) for url in candidate_urls(target)]
+    served = [o for o in outcomes if o.ok]
     result: dict[str, Any] = {
         "surface": "llms_txt",
         "source": target,
         "documents": [_document_summary(o) for o in outcomes],
+        "retrieved": len(served),
         "findings": [],
         "overall_risk": "low",
     }
 
-    served = [o for o in outcomes if o.ok]
     if not served:
         blocked = [o.blocked_reason for o in outcomes if o.blocked_reason]
         result["note"] = (

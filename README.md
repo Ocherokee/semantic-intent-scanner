@@ -140,6 +140,8 @@ export ANTHROPIC_API_KEY=your_key_here
 
 ## Usage
 
+### Scan a local skill
+
 ```bash
 # Scan a single instruction file
 semantic-intent scan ./SKILL.md
@@ -154,15 +156,41 @@ semantic-intent scan ./SKILL.md --json
 semantic-intent scan ./SKILL.md --no-color
 ```
 
+### Scan a site's remote agent-facing docs (`scan-remote`, v0.4)
+
+```bash
+# Give a site / base URL — the supported paths (/llms.txt, /llms-full.txt)
+# are derived for you
+semantic-intent scan-remote https://example.com
+
+# JSON output
+semantic-intent scan-remote https://example.com --json
+```
+
+`scan-remote` fetches the site's `llms.txt` / `llms-full.txt` through the
+SSRF-hardened guarded path (HTTPS only, private/blocked address space refused,
+every redirect re-validated, body decompression capped) and runs **rule-based +
+external-state analysis only**: install commands and referenced domains are
+extracted and checked against live PyPI / npm / DNS state. It never executes a
+command, installs a package, follows an instruction found in the retrieved
+text, or calls an LLM. **The semantic judge pass over retrieved content is not
+part of this command — that is v0.4 PR3.** A `LOW` result means no rule-based or
+registry/DNS finding; it is not a safety guarantee, and registry existence is
+never treated as legitimacy.
+
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | Low risk — no violations detected |
+| 0 | Low risk — no blocking findings |
 | 1 | Medium risk — possible violations |
 | 2 | High or critical risk — likely violations |
+| 3 | `scan-remote` only: nothing could be scanned — every candidate fetch failed, was blocked, or was not found. **Not** a low-risk result. |
 
-Exit codes enable use in CI/CD pipelines to block installation of flagged skills.
+Exit codes enable use in CI/CD pipelines to block installation of flagged
+skills. For `scan-remote`, security risk (`overall_risk`) and operational
+failure (`operational_status`) are separate fields in the JSON output — a
+failed scan reports `"overall_risk": null`, never `"low"`.
 
 ---
 
@@ -288,7 +316,8 @@ different angles.
   - [x] PR1 — I8 in the invariant + substrate model; SSRF-hardened `remote_fetch`;
         format-agnostic `remote_audit` engine; `registry` existence + provenance
         model; `llms_txt` adapter; benign/suspicious/malicious fixtures (offline)
-  - [ ] PR2 — `scan-remote` CLI subcommand + report sections
+  - [x] PR2 — `scan-remote` CLI subcommand + terminal/JSON remote report;
+        operational-failure exit code (3) kept distinct from risk
   - [ ] PR3 — judge pass over retrieved content (findings block as evidence)
   - [ ] PR4 — MCP tool-description adapter
 - [ ] v0.5 — Benchmark against ToxicSkills dataset (Snyk, February 2026)

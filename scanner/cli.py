@@ -7,6 +7,9 @@ Usage:
     semantic-intent scan <path> --dir      Scan entire skill directory
     semantic-intent scan <path> --json     Output JSON report
     semantic-intent scan <path> --no-color Plain text output
+
+    semantic-intent scan-remote <url>          Scan a site's llms.txt / llms-full.txt
+    semantic-intent scan-remote <url> --json   Output JSON report
 """
 
 import argparse
@@ -16,7 +19,15 @@ from pathlib import Path
 
 from .directory_audit import audit_directory
 from .evaluator import evaluate_skill
-from .report import render_directory_report, render_json_report, render_terminal_report
+from .llms_txt import audit_llms_txt
+from .report import (
+    remote_exit_code,
+    render_directory_report,
+    render_json_report,
+    render_remote_json_report,
+    render_remote_report,
+    render_terminal_report,
+)
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -110,6 +121,34 @@ def cmd_scan_directory(path: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan_remote(args: argparse.Namespace) -> int:
+    """
+    Scan a site's agent-facing remote documents (llms.txt / llms-full.txt).
+
+    Rule-based + external-state (registry / DNS) analysis only. No command is
+    executed, no package installed, no instruction in the retrieved text is
+    followed, and the LLM judge is not invoked (that is v0.4 PR3). The fetch
+    goes through the SSRF-hardened guarded path — HTTPS only, private/blocked
+    address space refused, every redirect re-validated, no bypass flag.
+    """
+    url = args.url
+    print(f"Fetching supported remote documents for {url} …", file=sys.stderr)
+    print(
+        "(guarded fetch: HTTPS-only, SSRF-blocked, decompression-capped; "
+        "no execution, no install, no LLM judge)",
+        file=sys.stderr,
+    )
+
+    results = audit_llms_txt(url)  # live RegistryClient + guarded_fetch defaults
+
+    if args.json:
+        print(render_remote_json_report(results, url))
+    else:
+        print(render_remote_report(results, url, colorize=not args.no_color))
+
+    return remote_exit_code(results)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="semantic-intent",
@@ -129,10 +168,20 @@ def main() -> None:
         help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var)",
     )
 
+    remote_parser = subparsers.add_parser(
+        "scan-remote",
+        help="Scan a site's remote agent-facing documents (llms.txt / llms-full.txt)",
+    )
+    remote_parser.add_argument("url", help="Site or base URL, e.g. https://example.com")
+    remote_parser.add_argument("--json", action="store_true", help="Output JSON report")
+    remote_parser.add_argument("--no-color", action="store_true", help="Disable color output")
+
     args = parser.parse_args()
 
     if args.command == "scan":
         sys.exit(cmd_scan(args))
+    if args.command == "scan-remote":
+        sys.exit(cmd_scan_remote(args))
 
 
 if __name__ == "__main__":

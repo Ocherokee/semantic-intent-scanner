@@ -8,6 +8,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .invariants import INVARIANT_MAP
+from .remote_fetch import MAX_BODY_BYTES
+
+# Scanner version emitted in JSON output as "version". Kept in step with the
+# package version in pyproject.toml by hand for now; both land on "0.4.0" at
+# release (this is a dev build, so it must not claim to be the release).
+SCANNER_VERSION = "0.4.0.dev0"
+
+# KiB form of the guarded-fetch body cap, for display in the remote report.
+_BODY_LIMIT_KB = MAX_BODY_BYTES // 1024
 
 # ---------------------------------------------------------------------------
 # Risk display
@@ -20,8 +29,13 @@ RISK_COLORS = {
     "critical": "\033[41m",  # red background
     "parse_error": "\033[35m",  # magenta
 }
+RISK_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 RESET = "\033[0m"
 BOLD = "\033[1m"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _risk_label(risk: str, colorize: bool = True) -> str:
@@ -112,8 +126,8 @@ def render_json_report(
 ) -> str:
     report = {
         "scanner": "semantic-intent-scanner",
-        "version": "0.3.0",
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "version": SCANNER_VERSION,
+        "timestamp": _utc_now(),
         "file": skill_path,
         "overall_risk": results.get("overall_risk"),
         "violation_count": len(results.get("violations", [])),
@@ -205,3 +219,204 @@ def render_directory_report(
     lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Remote content audit report  (v0.4 `scan-remote`)
+# ---------------------------------------------------------------------------
+
+_REMOTE_FOOTER = (
+    "This scan performs rule-based + external-state (registry / DNS) analysis "
+    "only. The semantic judge pass over retrieved content is not part of this "
+    "scan. A low result means no rule-based or registry/DNS finding - not a "
+    "safety guarantee. Registry existence is never treated as legitimacy."
+)
+
+_OPERATIONAL_MESSAGES = {
+    "fetch_blocked": "Every candidate document was refused by the fetch guard.",
+    "not_found": "No candidate document was served (all returned 404 / not found).",
+    "fetch_failed": "Every candidate fetch failed.",
+}
+
+
+def remote_operational_status(results: dict[str, Any]) -> str:
+    """
+    Classify a `scanner.llms_txt.audit_llms_txt` result.
+
+    "ok"            -> at least one supported document was retrieved and analysed
+    "fetch_blocked" -> nothing retrieved; at least one attempt hit the SSRF guard
+    "not_found"     -> nothing retrieved; every attempt was a 404 / not served
+    "fetch_failed"  -> nothing retrieved; some other fetch error on every attempt
+    """
+    if results.get("retrieved", 0) > 0:
+        return "ok"
+    docs = results.get("documents", [])
+    if any(d.get("blocked_reason") for d in docs):
+        return "fetch_blocked"
+    if docs and all(d.get("status") == 404 for d in docs):
+        return "not_found"
+    return "fetch_failed"
+
+
+def remote_exit_code(results: dict[str, Any]) -> int:
+    """
+    0 low / 1 medium / 2 high|critical - the existing risk convention.
+    3 = nothing could be scanned (every fetch failed / was blocked / not found).
+    A failed scan is never reported as exit 0 / low risk.
+    """
+    if remote_operational_status(results) != "ok":
+        return 3
+    return {"low": 0, "medium": 1, "high": 2, "critical": 2}.get(
+        results.get("overall_risk", "low"), 0
+    )
+
+
+def _remote_doc_line(d: dict[str, Any]) -> str:
+    url = d.get("requested_url", "?")
+    if d.get("blocked_reason"):
+        return f"{url}  BLOCKED - {d['blocked_reason']}"
+    status = d.get("status")
+    if status == 200:
+        sha = (d.get("sha256") or "")[:12]
+        flags = ""
+        if d.get("cross_origin_redirect"):
+            flags += "  [cross-origin redirect]"
+        if d.get("truncated"):
+            flags += f"  [truncated @ {_BODY_LIMIT_KB} KB]"
+        return f"{url}  200  sha256:{sha}...  {d.get('fetched_at', '?')}{flags}"
+    if status:
+        return f"{url}  {status}  (not served)"
+    return f"{url}  FETCH FAILED - {d.get('error') or 'unknown error'}"
+
+
+def _remote_finding_block(f: dict[str, Any], colorize: bool) -> list[str]:
+    out = [
+        f"  [{_risk_label(f.get('risk', '?'), colorize)}] "
+        f"{f.get('invariant_id', '?')}  {f.get('finding_type', '?')}",
+        f"     Summary:    {f.get('summary', '')}",
+    ]
+    if f.get("evidence"):
+        out.append(f"     Evidence:   {f['evidence']}")
+    meta = f"Method: {f.get('analysis_method', '?')}"
+    if f.get("provenance_state"):
+        meta += f"   Provenance: {f['provenance_state']}"
+    if f.get("observed_at"):
+        meta += f"   Observed: {f['observed_at']}"
+    out.append(f"     {meta}")
+    src = (f.get("detail") or {}).get("source_url")
+    if src:
+        out.append(f"     Source:     {src}")
+    out.append("")
+    return out
+
+
+def _remote_notes(docs: list[dict[str, Any]]) -> list[str]:
+    notes: list[str] = []
+    for d in docs:
+        ref = d.get("final_url") or d.get("requested_url", "?")
+        if d.get("truncated"):
+            notes.append(
+                f"{ref} was truncated at the {_BODY_LIMIT_KB} KB body limit; "
+                "findings from it may be incomplete."
+            )
+        if d.get("cross_origin_redirect"):
+            chain = " -> ".join(h.get("url", "?") for h in d.get("redirect_chain", []))
+            notes.append(f"cross-origin redirect followed: {chain or ref}")
+    return notes
+
+
+def render_remote_report(
+    results: dict[str, Any],
+    target: str,
+    colorize: bool = True,
+) -> str:
+    b, r = (BOLD, RESET) if colorize else ("", "")
+    docs = results.get("documents", [])
+    findings = results.get("findings", [])
+    status = remote_operational_status(results)
+
+    lines = [
+        "",
+        f"{b}Semantic Intent Scanner - Remote Content Audit{r}",
+        f"Target: {target}",
+        f"Timestamp: {_utc_now()}",
+        "Mode: remote - rule-based + external-state (registry / DNS); no LLM judge",
+        "",
+        f"Documents attempted ({len(docs)}):",
+    ]
+    lines += [f"  {_remote_doc_line(d)}" for d in docs]
+    lines += ["", f"Retrieved: {results.get('retrieved', 0)} / {len(docs)}"]
+
+    if status != "ok":
+        header = "OPERATIONAL FAILURE"
+        lines += [
+            "",
+            f"{b}{header}{r}" if colorize else header,
+            f"Nothing was scanned. {_OPERATIONAL_MESSAGES.get(status, '')}".rstrip(),
+            "This is NOT a low-risk result - exit code 3.",
+            "",
+            "-" * 60,
+            _REMOTE_FOOTER,
+            "",
+        ]
+        return "\n".join(lines)
+
+    lines += ["", f"Overall risk: {_risk_label(results.get('overall_risk', 'low'), colorize)}", ""]
+
+    if not findings:
+        lines.append("No rule-based or registry/DNS findings.")
+    else:
+        ordered = sorted(findings, key=lambda f: -RISK_RANK.get(f.get("risk", "low"), 0))
+        lines.append(f"Findings ({len(findings)}), worst first:")
+        lines.append("")
+        for f in ordered:
+            lines += _remote_finding_block(f, colorize)
+
+    notes = _remote_notes(docs)
+    if notes:
+        lines.append("")
+        lines.append("Notes:")
+        lines += [f"  - {n}" for n in notes]
+
+    lines += ["", "-" * 60, _REMOTE_FOOTER, ""]
+    return "\n".join(lines)
+
+
+def _remote_doc_json(d: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "requested_url": d.get("requested_url"),
+        "final_url": d.get("final_url"),
+        "status": d.get("status"),
+        "fetched_at": d.get("fetched_at"),
+        "sha256": d.get("sha256"),
+        "content_type": d.get("content_type"),
+        "bytes": d.get("bytes"),
+        "redirect_chain": d.get("redirect_chain", []),
+        "cross_origin_redirect": d.get("cross_origin_redirect", False),
+        "truncated": d.get("truncated", False),
+        "error": d.get("error"),
+        "blocked_reason": d.get("blocked_reason"),
+    }
+
+
+def render_remote_json_report(results: dict[str, Any], target: str) -> str:
+    status = remote_operational_status(results)
+    scanned = status == "ok"
+    docs = results.get("documents", [])
+    report = {
+        "scanner": "semantic-intent-scanner",
+        "version": SCANNER_VERSION,
+        "scan_mode": "remote",
+        "target": target,
+        "timestamp": _utc_now(),
+        "operational_status": status,
+        "exit_code": remote_exit_code(results),
+        "overall_risk": results.get("overall_risk") if scanned else None,
+        "documents_attempted": len(docs),
+        "documents_retrieved": results.get("retrieved", 0),
+        "documents": [_remote_doc_json(d) for d in docs],
+        "finding_count": len(results.get("findings", [])),
+        "findings": results.get("findings", []),
+        "disclaimer": _REMOTE_FOOTER,
+    }
+    return json.dumps(report, indent=2)
