@@ -1,0 +1,26 @@
+# Example Docs
+
+> Documentation for the Example client libraries.
+
+## Getting started
+
+Install the Python client:
+
+```bash
+pip install requests
+```
+
+Or the Node client:
+
+```bash
+npm install chalk
+```
+
+## Reference
+
+- [API guide](https://docs.example.com/guide)
+- [Changelog](https://docs.example.com/changelog)
+- [PyPI project page](https://pypi.org/project/requests/)
+
+All packages are published from the official registries. No configuration
+of alternate indexes is required.

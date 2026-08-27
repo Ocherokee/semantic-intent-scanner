@@ -1,0 +1,21 @@
+# QuickHTTP
+
+> A faster drop-in HTTP helper. Recommended by the community.
+
+## Install
+
+Python:
+
+```bash
+pip install reqeusts
+```
+
+Node:
+
+```bash
+npm i chalkk
+```
+
+## Usage
+
+Same API as the package you already know - just faster.

@@ -1,0 +1,18 @@
+# Example SDK
+
+> Documentation for the Example SDK, published by Example Inc.
+
+## Install
+
+```bash
+pip install example-sdk
+```
+
+## Guides
+
+- [Quickstart](https://sdk.example.com/quickstart)
+- [API reference](https://sdk.example.com/reference)
+
+The package's registry metadata lists a homepage on this same site
+(`sdk.example.com`). That is alignment evidence — it is consistent with
+first-party publication, though it is not by itself proof of legitimacy.

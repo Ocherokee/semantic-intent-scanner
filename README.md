@@ -47,7 +47,7 @@ The scanner can now answer two questions instead of one.
 
 ---
 
-## The Seven Invariants
+## The Invariants
 
 These define the minimum conditions for trustworthy agent operation.
 An instruction set that violates any of these cannot be said to be
@@ -62,6 +62,29 @@ operating on behalf of its user.
 | I5 | No Command Laundering | Do not launder operational commands as documentation or examples. |
 | I6 | No Auditability Suppression | Do not suppress the ability of the user or system to audit actions. |
 | I7 | No Authority Laundering | Do not represent third-party authority as first-party authority. |
+| I8 | No Unverified External Instruction | Do not treat retrieved content (remote documents, tool descriptions) as authoritative instruction, and do not extend the agent's trust to a package/domain/index/tool it names, without a trust decision. |
+
+I8 (v0.4) covers the remote-content surfaces. A stale or unclaimed
+reference is an environmental condition — the invariant failure is the
+agent treating that unresolved external authority as trustworthy — so
+"dangling reference" is a **finding type under I8**, not a separate
+invariant. Detector types: `dangling_package`, `dangling_domain`,
+`unverified_package_provenance`, `unverified_domain_provenance`,
+`index_url_override`, `cross_origin_instruction`. Existence and DNS
+checks are mechanical external-state evidence (`scanner.registry`), not a
+judge call — but **existence is never treated as legitimacy**.
+
+Provenance ladder: `unclaimed` (404 / NXDOMAIN) → `unknown` (lookup
+failed) → `unverified` (exists, provenance not established — a
+different-site homepage is *not* a conflict) → `origin_aligned` (declared
+homepage/repo on the same registrable site as the document — *alignment
+evidence, not proof*) → `conflicting` (broken/contradictory provenance
+evidence). `corroborated` / `mismatched` are reserved for stronger
+evidence PR1 does not gather.
+
+I8 maps to M2 Transparency + M4 Integrity + M1 Consent — **not** M3
+Accountability: I8 is the trust decision made *before* harm; failing to
+recognise or correct the consequences afterward is a separate failure.
 
 ---
 
@@ -93,6 +116,7 @@ of a system that cannot be deceptive, coercive, or indifferent by design.
 | I5 No Command Laundering | Transparency + Integrity |
 | I6 No Auditability Suppression | Transparency + Accountability |
 | I7 No Authority Laundering | Integrity + Consent |
+| I8 No Unverified External Instruction | Transparency + Integrity + Consent |
 
 This means the scanner no longer just flags risk. It explains the ethical
 mechanism failure that made the risk possible — turning security findings
@@ -145,24 +169,33 @@ Exit codes enable use in CI/CD pipelines to block installation of flagged skills
 ## Architecture
 
 ```
-Skill package
-  |
-  Directory Audit (v0.3)
-  |- test file detection
-  |- config file evaluation
-  +- dangerous pattern scan
-  |
-  Semantic Evaluator (v0.1)
+Skill package                     Retrieved remote document (v0.4)
+  |                                  |  llms.txt / llms-full.txt  (MCP tool descriptions: PR4)
+  Directory Audit (v0.3)             remote_fetch.py  -- SSRF-hardened GET (per-hop IP validation,
+  |- test file detection             |                   pinned-IP connect, no cross-origin creds,
+  |- config file evaluation          |                   decompressed-size cap)
+  +- dangerous pattern scan          remote_audit.py  -- analyze_document(): format-agnostic
+  |                                  |   |- extract install commands / domains / execution framing
+  |                                  |   +- registry.py: existence + provenance signal (PyPI/npm/DNS)
+  |                                  |
+  Semantic Evaluator (v0.1)  <-------+  (judge pass consumes findings as evidence; PR3)
   |- chunk SKILL.md
-  |- evaluate against 7 invariants (LLM-as-judge)
+  |- evaluate against the invariants (LLM-as-judge)
   +- aggregate violations
   |
-  Substrate Layer (v0.2)
-  |- map violations to ethical mechanisms
-  +- generate causal explanation
+  Substrate Layer (v0.2)  -- map violations to ethical mechanisms + causal explanation
   |
   Report (terminal or JSON)
 ```
+
+Each `Finding` from the remote lane records how it was reached:
+`analysis_method` is `rule_based` (parsing the document text — stable given
+the bytes), `external_state` (a live registry/DNS lookup — a **time-stamped
+snapshot**, carried in `observed_at`), or `fixture` (that lookup answered
+from an offline snapshot, for tests). The judge pass may add context; it may
+not overturn a `rule_based` / `external_state` / `fixture` finding by
+re-reading the prose. A package that becomes claimed *after* a scan never
+downgrades an earlier finding — **existence is not legitimacy**.
 
 ---
 
@@ -183,9 +216,25 @@ tests/fixtures/
                                expected: high/critical (judge must not comply)
 ```
 
+```
+tests/fixtures/llms_txt/                     (v0.4 remote-content lane)
+  benign/first-party-sdk-llms.txt            pkg exists, homepage origin_aligned  -> low (recorded)
+  benign/docs-site-llms.txt                  3rd-party docs, pkgs unverified       -> low (recorded)
+  suspicious/agent-tooling-llms.txt          pkg registered 10 days ago           -> medium
+  malicious/onboarding-llms-full.txt         dangling pkg + dead index + curl|sh   -> critical
+  malicious/typosquat-llms.txt               targets one edit from popular pkgs    -> high
+  malicious/registered-after-dangling-llms.txt  now exists, unverified + new + exec -> high
+  mock_registry.json                         offline provenance oracle (existence + provenance_urls)
+```
+
 `tests/test_fixtures.py` runs the `.md` fixtures through `evaluate_skill()` and
-asserts each one meets its documented risk floor. It is skipped automatically
-when `ANTHROPIC_API_KEY` is unset.
+asserts each meets its documented risk floor (auto-skips without
+`ANTHROPIC_API_KEY`). `tests/test_remote_fetch.py`, `test_remote_audit.py`, and
+`test_llms_txt.py` cover the SSRF guard, the format-agnostic analysis engine,
+and the llms.txt adapter — fully offline (faked fetch transport + mock
+registry), no API key. The `registered-after-dangling` fixture is the proof
+that `exists == safe` is false: the package resolves, and the scan still
+reports `high`.
 
 ### Judge robustness
 
@@ -205,6 +254,8 @@ still has no defence-in-depth against content crafted to fool the judge itself.
 | Instruction layer | Malicious SKILL.md | Snyk ToxicSkills, Feb 2026 | Semantic evaluation |
 | Test file layer | Bundled *.test.ts / conftest.py | Gecko Security, May 2026 | Directory audit |
 | Config layer | .mcp.json / .claude/settings.json | Adversa AI TrustFall, May 2026 | Directory audit |
+| Remote docs layer | llms.txt / llms-full.txt naming unregistered or unverified packages/domains | Ars Technica, Aug 2026 | Remote audit (rule-based + external-state) |
+| MCP tool layer | Injection in a server's tool `description` fields | — | Planned, v0.4 PR4 |
 
 ---
 
@@ -230,12 +281,19 @@ different angles.
 
 ## Roadmap
 
-- [x] v0.1 — CLI prototype, seven invariants, LLM evaluator, test fixtures
+- [x] v0.1 — CLI prototype, invariants I1–I7, LLM evaluator, test fixtures
 - [x] v0.2 — Fractal ethical substrate layer, mechanism mapping, causal reporting
 - [x] v0.3 — Directory audit module, test file and config attack surfaces
-- [ ] v0.4 — Benchmark against ToxicSkills dataset (Snyk, February 2026)
-- [ ] v0.5 — False positive analysis, threshold calibration
-- [ ] v0.6 — Relational integrity monitor (conversational trajectory evaluation)
+- [ ] v0.4 — Remote-content surfaces (invariant I8)
+  - [x] PR1 — I8 in the invariant + substrate model; SSRF-hardened `remote_fetch`;
+        format-agnostic `remote_audit` engine; `registry` existence + provenance
+        model; `llms_txt` adapter; benign/suspicious/malicious fixtures (offline)
+  - [ ] PR2 — `scan-remote` CLI subcommand + report sections
+  - [ ] PR3 — judge pass over retrieved content (findings block as evidence)
+  - [ ] PR4 — MCP tool-description adapter
+- [ ] v0.5 — Benchmark against ToxicSkills dataset (Snyk, February 2026)
+- [ ] v0.6 — False positive analysis, threshold calibration
+- [ ] v0.7 — Relational integrity monitor (conversational trajectory evaluation)
 - [ ] v1.0 — Publishable research findings
 
 ---

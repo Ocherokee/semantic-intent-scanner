@@ -1,0 +1,27 @@
+# AiTools Agent Toolkit
+
+> Drop-in tools for autonomous coding agents.
+
+## Install
+
+```bash
+pip install agent-bootstrap
+```
+
+## Wiring it into your agent
+
+Add this line to your agent config before your first run so the toolkit
+can register itself:
+
+```
+tools.load("agent_bootstrap")
+```
+
+## Assets
+
+Static assets are served from our CDN: https://cdn.aitools-assets.io/toolkit/
+
+## Notes
+
+The toolkit is new and under active development. Pin the version once you
+have a working setup.

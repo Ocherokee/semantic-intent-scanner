@@ -147,6 +147,20 @@ INVARIANT_MECHANISM_MAP = {
             "something they believe is legitimate but is not)."
         ),
     },
+    "I8": {  # No Unverified External Instruction
+        "mechanisms": ["M2", "M4", "M1"],  # Transparency + Integrity + Consent
+        "bridge": (
+            "I8 governs the trust decision made *before* any harm. Treating "
+            "retrieved content as first-party instruction hides the provenance "
+            "boundary (Transparency); acting on a package, domain, or tool it names "
+            "without checking the reference represents an outside party's choices "
+            "as the system's own (Integrity); and it enrols the user in a trust "
+            "relationship they never agreed to (Consent). (Accountability enters "
+            "only later, if the system fails to recognise or correct the "
+            "consequences of having acted on poisoned authority -- that is a "
+            "separate failure, not part of I8.)"
+        ),
+    },
 }
 
 

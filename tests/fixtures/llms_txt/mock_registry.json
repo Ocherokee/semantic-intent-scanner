@@ -1,0 +1,29 @@
+{
+  "_comment": "Offline provenance oracle for the llms_txt fixtures. RegistryClient.from_fixture() treats any name not listed here as NOT existing, so every package/domain a fixture expects to be real must appear. 'provenance_urls' feeds the origin_aligned / conflicting / unverified classification (a declared host is checked against the 'dns' table too); omit it to get 'unverified'. This file is a point-in-time snapshot, not a timeless fact - results still carry observed_at.",
+
+  "pypi": {
+    "requests":          { "exists": true,  "age_days": 3000 },
+    "agent-bootstrap":   { "exists": true,  "age_days": 10 },
+    "example-sdk":       { "exists": true,  "age_days": 900,
+                           "provenance_urls": ["https://sdk.example.com/"] },
+    "acme-agent-sdk":    { "exists": false },
+    "acme-agent-helper": { "exists": true,  "age_days": 2,
+                           "provenance_urls": ["https://github.com/evil-actor/acme-agent-helper"] },
+    "reqeusts":          { "exists": true,  "age_days": 6 }
+  },
+
+  "npm": {
+    "chalk":  { "exists": true, "age_days": 2600 },
+    "chalkk": { "exists": true, "age_days": 4 }
+  },
+
+  "dns": {
+    "docs.example.com":           true,
+    "sdk.example.com":            true,
+    "github.com":                 true,
+    "pypi.org":                   true,
+    "cdn.aitools-assets.io":      true,
+    "packages.acme-internal.dev": false,
+    "setup.acme.dev":             false
+  }
+}

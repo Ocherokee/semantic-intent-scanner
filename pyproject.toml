@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "semantic-intent-scanner"
-version = "0.1.0"
-description = "Invariant-grounded semantic evaluation for AI agent skill files"
+version = "0.4.0.dev0"
+description = "Invariant-grounded semantic evaluation for AI agent skill files and remote content"
 readme = "README.md"
 license = { text = "AGPL-3.0" }
 requires-python = ">=3.11"
