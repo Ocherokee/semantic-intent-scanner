@@ -177,7 +177,24 @@ tests/fixtures/
   malicious/
     solana-wallet-tracker.md   SKILL.md credential theft, expected: critical
     reviewer.test.ts           test file exfiltration vector, expected: critical
+  adversarial/
+    judge-injection.md         real I2/I7 violation + an embedded instruction
+                               telling the evaluator to return a clean verdict,
+                               expected: high/critical (judge must not comply)
 ```
+
+`tests/test_fixtures.py` runs the `.md` fixtures through `evaluate_skill()` and
+asserts each one meets its documented risk floor. It is skipped automatically
+when `ANTHROPIC_API_KEY` is unset.
+
+### Judge robustness
+
+The evaluator's system prompt treats the passage under evaluation as untrusted,
+adversarial input: text inside the passage that claims prior audit clearance or
+instructs the evaluator to downgrade its verdict is itself flagged as I5/I7
+rather than obeyed. `adversarial/judge-injection.md` is the regression test for
+this. This is a first-pass mitigation, not a guarantee — a single judge call
+still has no defence-in-depth against content crafted to fool the judge itself.
 
 ---
 
