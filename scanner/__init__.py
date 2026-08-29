@@ -22,6 +22,13 @@ from .substrate import (
     get_bridge_for_invariant,
     get_mechanisms_for_invariant,
 )
+from .surface_inventory import (
+    INVENTORY_SCHEMA_VERSION,
+    SurfaceInventory,
+    discover_inventory,
+    serialize_inventory,
+    validate_inventory,
+)
 
 __all__ = [
     "audit_directory",
@@ -45,4 +52,9 @@ __all__ = [
     "SUBSTRATE_MECHANISMS",
     "get_bridge_for_invariant",
     "get_mechanisms_for_invariant",
+    "INVENTORY_SCHEMA_VERSION",
+    "SurfaceInventory",
+    "discover_inventory",
+    "serialize_inventory",
+    "validate_inventory",
 ]
