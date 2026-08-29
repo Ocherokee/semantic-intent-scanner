@@ -27,6 +27,9 @@ semantic-intent scan-remote https://example.com --judge
 
 # Audit a captured MCP tools/list response — no MCP server is contacted
 semantic-intent scan-mcp ./captured-tools-list.json
+
+# Inventory a site's agent-readable attack surface without scoring it
+semantic-intent inventory https://example.com
 ```
 
 Run it against the repo's own fixtures to see a real offline detection in a few
@@ -103,6 +106,8 @@ The scanner now answers several questions, not one.
 **v0.2 adds:** Which ethical mechanism failed, and why did that failure create executable risk?  
 **v0.3 adds:** Are there attack surfaces in this skill package beyond the instruction file?  
 **v0.4 adds:** Is external semantic content being allowed to direct behavior or extend trust without a trust decision — including remote documents and MCP tool metadata?
+**v0.5 adds:** Can findings be exchanged and retested without coupling them to one scanner implementation?
+**v0.6 adds:** What agent-readable surfaces does a site expose, how were they discovered, and what do they declare?
 
 ---
 
@@ -425,9 +430,10 @@ reach it.
   - [x] PR3 — two-pass semantic judge over retrieved content as untrusted evidence
   - [x] PR4 — `scan-mcp` adapter for captured MCP `tools/list` metadata
 - [x] v0.5 — Stable machine-readable finding contract (`schema_version: "0.1"`)
-- [ ] v0.6 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
-- [ ] v0.7 — False-positive analysis, threshold calibration
-- [ ] v0.8 — Relational integrity monitor (conversational trajectory evaluation)
+- [x] v0.6 — Agent-readable attack-surface inventory (`inventory_schema_version: "0.1"`)
+- [ ] v0.7 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
+- [ ] v0.8 — False-positive analysis, threshold calibration
+- [ ] v0.9 — Relational integrity monitor (conversational trajectory evaluation)
 - [ ] v1.0 — Publishable research findings
 
 The v0.5 contract is independently versioned from the scanner package and
@@ -436,6 +442,11 @@ remediation-outcome, and declarative-retest semantics while preserving existing
 outputs through explicit adapters. See
 [`docs/v0.5-finding-contract.md`](docs/v0.5-finding-contract.md) for the schema,
 validation rules, compatibility policy, and migration guidance.
+
+The v0.6 inventory is also independently versioned. It records factual surface
+observations, discovery provenance, and declared relationships without creating
+findings or changing risk. See
+[`docs/v0.6-agent-surface-inventory.md`](docs/v0.6-agent-surface-inventory.md).
 
 **The next priority is empirical, not conceptual:** benchmark the frozen I1–I8
 system, characterize false positives and false negatives, and calibrate risk

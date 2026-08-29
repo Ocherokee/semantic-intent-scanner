@@ -10,6 +10,8 @@ Usage:
 
     semantic-intent scan-remote <url>          Scan a site's llms.txt / llms-full.txt
     semantic-intent scan-remote <url> --json   Output JSON report
+
+    semantic-intent inventory <url>            Inventory public agent-readable surfaces as JSON
 """
 
 import argparse
@@ -29,6 +31,7 @@ from .report import (
     render_remote_report,
     render_terminal_report,
 )
+from .surface_inventory import InventoryError, discover_inventory, serialize_inventory
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -200,6 +203,22 @@ def cmd_scan_mcp(args: argparse.Namespace) -> int:
     return remote_exit_code(results)
 
 
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Emit a bounded factual inventory; no detector or risk lane is invoked."""
+    print(
+        f"Inventorying public agent-readable surfaces for {args.url} …\n"
+        "(bounded guarded retrieval; no crawling, execution, judge, or risk analysis)",
+        file=sys.stderr,
+    )
+    try:
+        inventory = discover_inventory(args.url)
+    except InventoryError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 3
+    print(serialize_inventory(inventory))
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="semantic-intent",
@@ -260,6 +279,12 @@ def main() -> None:
         help="Name of the MCP server the file came from (provenance only; not authenticated)",
     )
 
+    inventory_parser = subparsers.add_parser(
+        "inventory",
+        help="Inventory bounded public agent-readable surfaces (JSON; no risk analysis)",
+    )
+    inventory_parser.add_argument("url", help="Site or base URL, e.g. https://example.com")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -268,6 +293,8 @@ def main() -> None:
         sys.exit(cmd_scan_remote(args))
     if args.command == "scan-mcp":
         sys.exit(cmd_scan_mcp(args))
+    if args.command == "inventory":
+        sys.exit(cmd_inventory(args))
 
 
 if __name__ == "__main__":
