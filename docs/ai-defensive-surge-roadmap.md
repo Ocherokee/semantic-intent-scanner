@@ -55,19 +55,24 @@ platform, or a substitute for internal access-control review.
   unresolved provenance are detector findings beneath I8, not separate ethical
   invariants.
 
-### Implemented on reviewed feature branches, not on `master`
+### Additional v0.4 coverage now on `master`
 
-- `v0.4-scan-remote-cli` makes the remote lane runnable as
-  `semantic-intent scan-remote <url>`, adds terminal and JSON reports, preserves
-  per-document provenance, and distinguishes security risk from an operational
-  failure to scan.
-- Later v0.4 branches add a bounded semantic second pass for retrieved content
-  and an offline MCP `tools/list` description adapter. These remain branch
-  coverage until merged; the roadmap does not count them as released behavior.
-- `v0.4-workflow-injection-pattern` documents Workflow Injection as a failure
-  of verification and authorization boundaries. It is a documented pattern,
-  not evidence that the scanner currently monitors inboxes, tickets, or
-  webhooks.
+- **Remote CLI and reports.** `semantic-intent scan-remote <url>` runs the
+  remote lane and emits terminal or JSON reports with per-document provenance.
+  It distinguishes security risk from an operational failure to scan, so an
+  unavailable target is never reported as low risk.
+- **Bounded semantic second pass.** Remote content can receive a judge pass
+  that treats retrieved text as untrusted data, supplies mechanical findings as
+  protected evidence, and does not let semantic interpretation erase those
+  findings.
+- **MCP tool-description inspection.** `semantic-intent scan-mcp <path>` audits
+  captured `tools/list` payloads without starting a server or calling a tool.
+  It covers tool and parameter descriptions, hidden directives, instruction
+  patterns, obfuscation, capability mismatch, and tool shadowing.
+- **Workflow Injection model.** The failure-pattern catalogue documents
+  Workflow Injection as a breakdown between understanding, truth verification,
+  and authority verification. This remains documented analysis, not a claim
+  that the scanner monitors inboxes, tickets, chat, or webhooks.
 
 This coverage aligns most directly with the coalition's calls to find dangerous
 weaknesses, test defenses continuously, verify results, strengthen defensive
