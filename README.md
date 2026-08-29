@@ -424,10 +424,18 @@ reach it.
   - [x] PR2 — `scan-remote` CLI + terminal/JSON reports; exit 3 separates operational failure from risk
   - [x] PR3 — two-pass semantic judge over retrieved content as untrusted evidence
   - [x] PR4 — `scan-mcp` adapter for captured MCP `tools/list` metadata
-- [ ] v0.5 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
-- [ ] v0.6 — False-positive analysis, threshold calibration
-- [ ] v0.7 — Relational integrity monitor (conversational trajectory evaluation)
+- [x] v0.5 — Stable machine-readable finding contract (`schema_version: "0.1"`)
+- [ ] v0.6 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
+- [ ] v0.7 — False-positive analysis, threshold calibration
+- [ ] v0.8 — Relational integrity monitor (conversational trajectory evaluation)
 - [ ] v1.0 — Publishable research findings
+
+The v0.5 contract is independently versioned from the scanner package and
+legacy report envelopes. It defines canonical observation, rationale,
+remediation-outcome, and declarative-retest semantics while preserving existing
+outputs through explicit adapters. See
+[`docs/v0.5-finding-contract.md`](docs/v0.5-finding-contract.md) for the schema,
+validation rules, compatibility policy, and migration guidance.
 
 **The next priority is empirical, not conceptual:** benchmark the frozen I1–I8
 system, characterize false positives and false negatives, and calibrate risk

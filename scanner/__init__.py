@@ -2,6 +2,16 @@
 
 from .directory_audit import audit_directory
 from .evaluator import evaluate_skill
+from .finding_contract import (
+    FINDING_SCHEMA_VERSION,
+    FindingContract,
+    adapt_directory_finding,
+    adapt_remote_finding,
+    adapt_semantic_violation,
+    serialize_finding_contract,
+    serialize_finding_contracts,
+    validate_finding_contract,
+)
 from .invariants import INVARIANTS, INVARIANT_MAP
 from .llms_txt import audit_llms_txt
 from .mcp_adapter import audit_mcp_tools
@@ -16,6 +26,14 @@ from .substrate import (
 __all__ = [
     "audit_directory",
     "evaluate_skill",
+    "FINDING_SCHEMA_VERSION",
+    "FindingContract",
+    "adapt_directory_finding",
+    "adapt_remote_finding",
+    "adapt_semantic_violation",
+    "serialize_finding_contract",
+    "serialize_finding_contracts",
+    "validate_finding_contract",
     "INVARIANTS",
     "INVARIANT_MAP",
     "audit_llms_txt",
