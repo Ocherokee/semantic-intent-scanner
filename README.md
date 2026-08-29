@@ -247,7 +247,7 @@ still has no defence-in-depth against content crafted to fool the judge itself.
 
 ---
 
-## Documented attack surfaces covered
+## Documented attack surfaces and failure patterns
 
 | Attack Surface | Vector | Source | Coverage |
 |---------------|--------|--------|----------|
@@ -256,6 +256,12 @@ still has no defence-in-depth against content crafted to fool the judge itself.
 | Config layer | .mcp.json / .claude/settings.json | Adversa AI TrustFall, May 2026 | Directory audit |
 | Remote docs layer | llms.txt / llms-full.txt naming unregistered or unverified packages/domains | Ars Technica, Aug 2026 | Remote audit (rule-based + external-state) |
 | MCP tool layer | Injection in a server's tool `description` fields | — | Planned, v0.4 PR4 |
+| Inbox / operational-message layer | Ordinary business communication whose operational structure (reported failure state + named managed asset + deadline + single "remediation") induces a task-completing agent to execute the remediation without verifying the sender's authority | Horizon Accord case study, Aug 2026 | Documented pattern only — see [`docs/semantic-failure-patterns.md`](docs/semantic-failure-patterns.md); not yet a scanner surface |
+
+The last row is a **failure pattern**, not current tool coverage. Standing
+semantic-layer failure modes and their real-world case studies are catalogued
+in [`docs/semantic-failure-patterns.md`](docs/semantic-failure-patterns.md),
+mapped to the Invariant Set and the substrate.
 
 ---
 
@@ -276,6 +282,18 @@ The same semantic layer that enables instruction-layer attacks is also the
 layer where operational ethics must be evaluated. Security and alignment
 are not separate problems — they are the same problem examined from
 different angles.
+
+[`docs/semantic-failure-patterns.md`](docs/semantic-failure-patterns.md) is the
+standing catalogue of semantic-layer failure modes — patterns that graduate
+out of per-version scoping work once their invariant mapping is settled, each
+kept with a real-world case study. It opens with a framework primitive:
+**understanding is not verification; verification is not authorization** —
+three orthogonal checks an agent must keep separate, since a claim can be true
+without its speaker having authority to act on it. The first entry, **SFP-1
+Workflow Injection**, examines an agent treating a plausible, goal-fitting
+action as self-authorising (an I8 failure reached through a monitored
+information channel), using a phishing email received at Horizon Accord as the
+case.
 
 ---
 
