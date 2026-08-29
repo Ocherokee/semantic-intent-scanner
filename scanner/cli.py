@@ -125,21 +125,32 @@ def cmd_scan_remote(args: argparse.Namespace) -> int:
     """
     Scan a site's agent-facing remote documents (llms.txt / llms-full.txt).
 
-    Rule-based + external-state (registry / DNS) analysis only. No command is
-    executed, no package installed, no instruction in the retrieved text is
-    followed, and the LLM judge is not invoked (that is v0.4 PR3). The fetch
+    Rule-based + external-state (registry / DNS) analysis by default. `--judge`
+    adds a two-pass LLM evaluation of the retrieved content as untrusted
+    evidence (v0.4 PR3) — it never follows an instruction found in that
+    content, and a judge failure leaves the deterministic result intact.
+    No command is executed and no package is installed either way. The fetch
     goes through the SSRF-hardened guarded path — HTTPS only, private/blocked
     address space refused, every redirect re-validated, no bypass flag.
     """
     url = args.url
+    use_judge = getattr(args, "judge", False)
+
     print(f"Fetching supported remote documents for {url} …", file=sys.stderr)
     print(
         "(guarded fetch: HTTPS-only, SSRF-blocked, decompression-capped; "
-        "no execution, no install, no LLM judge)",
+        "no execution, no install"
+        + ("; retrieved content evaluated as untrusted evidence)" if use_judge else "; no LLM judge)"),
         file=sys.stderr,
     )
 
-    results = audit_llms_txt(url)  # live RegistryClient + guarded_fetch defaults
+    judge_cb = None
+    if use_judge:
+        from .remote_judge import judge_document
+
+        judge_cb = lambda doc, det: judge_document(doc, det, api_key=args.api_key)  # noqa: E731
+
+    results = audit_llms_txt(url, judge=judge_cb)  # live RegistryClient + guarded_fetch defaults
 
     if args.json:
         print(render_remote_json_report(results, url))
@@ -175,6 +186,16 @@ def main() -> None:
     remote_parser.add_argument("url", help="Site or base URL, e.g. https://example.com")
     remote_parser.add_argument("--json", action="store_true", help="Output JSON report")
     remote_parser.add_argument("--no-color", action="store_true", help="Disable color output")
+    remote_parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Also run the two-pass LLM judge over retrieved content (needs an API key)",
+    )
+    remote_parser.add_argument(
+        "--api-key",
+        default=None,
+        help="Anthropic API key for --judge (defaults to ANTHROPIC_API_KEY env var)",
+    )
 
     args = parser.parse_args()
 

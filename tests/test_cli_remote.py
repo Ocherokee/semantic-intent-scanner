@@ -64,16 +64,55 @@ def _fetch_all_blocked(url):
 # harness
 # ---------------------------------------------------------------------------
 
-def _run(monkeypatch, capsys, fetch, url="https://example.com", json_out=False):
+def _run(monkeypatch, capsys, fetch, url="https://example.com", json_out=False,
+         judge_flag=False, api_key=None, fake_judge=None):
     from scanner.llms_txt import audit_llms_txt as real
 
-    monkeypatch.setattr(
-        cli, "audit_llms_txt",
-        lambda u: real(u, registry=RegistryClient.from_fixture(MOCK), fetch=fetch),
-    )
-    ns = argparse.Namespace(url=url, json=json_out, no_color=True)
+    def _audit(u, **kw):
+        if fake_judge is not None and kw.get("judge") is not None:
+            kw["judge"] = fake_judge
+        return real(u, registry=RegistryClient.from_fixture(MOCK), fetch=fetch, **kw)
+
+    monkeypatch.setattr(cli, "audit_llms_txt", _audit)
+    ns = argparse.Namespace(url=url, json=json_out, no_color=True,
+                            judge=judge_flag, api_key=api_key)
     code = cli.cmd_scan_remote(ns)
     return code, capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# fake judge — canned JudgeResults per document
+# ---------------------------------------------------------------------------
+
+def _judge_finding(invariant="I7", risk="high", ftype="judge_semantic"):
+    from scanner.remote_audit import Finding
+    return Finding(
+        invariant_id=invariant, finding_type=ftype, risk=risk,
+        summary="narrates an unestablished vendor relationship", evidence="official renewal",
+        analysis_method="judge", observed_at="2026-08-28T00:00:01Z",
+        detail={"source_url": "https://x/llms.txt", "source_sha256": "s", "judge_model": "m",
+                "pass1": {"verdict": "possible", "confidence": 0.6, "reasoning": "a"},
+                "pass2": {"verdict": "likely", "confidence": 0.9, "reasoning": "b"},
+                "disagreement": ftype == "judge_pass_disagreement"},
+    )
+
+
+def make_judge(per_url=None, default=None):
+    """
+    Build a fake judge callable `(doc, det) -> JudgeResult`. `judge_document`
+    never raises, so neither does this — a failed pass is a JudgeResult with an
+    `unavailable:*` status. `per_url` keys on final_url / origin_url.
+    """
+    from scanner.remote_judge import JudgeResult
+
+    per_url = per_url or {}
+    fallback = default or JudgeResult(status="ok", findings=[], model="m",
+                                      passes=2, calls=2, disagreements=0)
+
+    def _judge(doc, det):
+        return per_url.get(doc.final_url, per_url.get(doc.origin_url, fallback))
+
+    return _judge
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +269,10 @@ def test_I_json_schema_has_required_metadata_and_full_findings(monkeypatch, caps
         assert key in f, f"missing finding key {key}"
     # external-state evidence is not collapsed into a generic flag
     methods = {f["analysis_method"] for f in p["findings"]}
-    assert methods <= {"rule_based", "external_state", "fixture"}
+    assert methods <= {"rule_based", "external_state", "fixture", "judge"}
     assert "fixture" in methods  # registry/DNS findings kept their method
+    # no --judge here -> no judge keys at all
+    assert "judge_status" not in p and "judge" not in p
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +308,166 @@ def test_scan_and_scan_remote_both_parse(monkeypatch):
         cli.main()
     assert parsed and parsed[0][0] == "scan"
     assert parsed[0][1].path == "./SKILL.md"
+
+
+# ---------------------------------------------------------------------------
+# --judge (v0.4 PR3) — fake judge, fully offline
+# ---------------------------------------------------------------------------
+
+def _fetch_both(body_llms, body_full):
+    def _fetch(url):
+        if url.endswith("/llms.txt"):
+            return _served("https://acme.example/llms.txt", body_llms)
+        if url.endswith("/llms-full.txt"):
+            return _served("https://acme.example/llms-full.txt", body_full)
+        return FetchOutcome(url, None, 404, None, b"", None, "2026-08-27T00:00:00Z", error="HTTP 404")
+    return _fetch
+
+
+def test_judge_finding_raises_overall_risk_and_exit(monkeypatch, capsys):
+    from scanner.remote_judge import JudgeResult
+    jr = JudgeResult(status="ok", findings=[_judge_finding("I7", "high")], model="m",
+                     passes=2, calls=2, disagreements=0)
+    code, out = _run(monkeypatch, capsys, _fetch_fixture("benign/first-party-sdk-llms.txt"),
+                     url="https://sdk.example.com", json_out=True,
+                     judge_flag=True, api_key="k", fake_judge=make_judge(default=jr))
+    p = json.loads(out)
+    assert p["judge_status"] == "ok"
+    assert p["semantic_coverage"] == "complete" and p["analysis_complete"] is True
+    assert p["overall_risk"] == "high"          # deterministic was low
+    assert p["exit_code"] == 2 and code == 2
+    assert any(f["analysis_method"] == "judge" for f in p["findings"])
+    assert p["judge"] == {"model": "m", "passes": 2, "calls": 2, "disagreements": 0}
+    assert "WARNING" not in out
+
+
+def test_judge_never_lowers_a_deterministic_critical(monkeypatch, capsys):
+    from scanner.remote_judge import JudgeResult
+    jr = JudgeResult(status="ok", findings=[], model="m", passes=2, calls=2, disagreements=0)
+    code, out = _run(monkeypatch, capsys,
+                     _fetch_fixture("malicious/onboarding-llms-full.txt", path="llms-full.txt"),
+                     url="https://acme.example", json_out=True,
+                     judge_flag=True, api_key="k", fake_judge=make_judge(default=jr))
+    p = json.loads(out)
+    assert p["overall_risk"] == "critical" and p["exit_code"] == 2 and code == 2
+    assert p["judge_status"] == "ok"
+
+
+def test_partial_judge_coverage_across_documents(monkeypatch, capsys):
+    from scanner.remote_judge import JudgeResult
+    ok = JudgeResult(status="ok", findings=[_judge_finding("I7", "medium")], model="m",
+                     passes=2, calls=2, disagreements=0)
+    failed = JudgeResult(status="unavailable:api_error", findings=[], model="m",
+                         passes=2, calls=1, disagreements=0)
+    per = {"https://acme.example/llms.txt": ok, "https://acme.example/llms-full.txt": failed}
+    code, out = _run(monkeypatch, capsys,
+                     _fetch_both(b"# a\npip install requests\n", b"# b\nnpm install chalk\n"),
+                     url="https://acme.example", json_out=True,
+                     judge_flag=True, api_key="k", fake_judge=make_judge(per_url=per))
+    p = json.loads(out)
+    assert p["judge_status"] == "partial"
+    assert p["semantic_coverage"] == "partial" and p["analysis_complete"] is False
+    assert p["judge"]["calls"] == 3  # 2 + 1
+    doc_status = {d["requested_url"]: d["judge"]["status"] for d in p["documents"] if d["judge"]}
+    assert doc_status["https://acme.example/llms.txt"] == "ok"
+    assert doc_status["https://acme.example/llms-full.txt"] == "unavailable:api_error"
+    assert any(f["analysis_method"] == "judge" for f in p["findings"])  # the OK doc's finding survived
+    assert code != 3  # judge failure is not an operational failure
+
+    _, term = _run(monkeypatch, capsys,
+                   _fetch_both(b"# a\npip install requests\n", b"# b\nnpm install chalk\n"),
+                   url="https://acme.example", judge_flag=True, api_key="k",
+                   fake_judge=make_judge(per_url=per))
+    assert "WARNING: --judge was requested but the semantic analysis did not fully complete" in term
+
+
+def test_all_documents_judge_fail_is_not_exit_3(monkeypatch, capsys):
+    from scanner.remote_judge import JudgeResult
+    failed = JudgeResult(status="unavailable:api_error", findings=[], model="m",
+                         passes=2, calls=1, disagreements=0)
+    code, out = _run(monkeypatch, capsys, _fetch_fixture("suspicious/agent-tooling-llms.txt"),
+                     url="https://aitools.example", json_out=True,
+                     judge_flag=True, api_key="k", fake_judge=make_judge(default=failed))
+    p = json.loads(out)
+    assert p["judge_status"] == "unavailable:api_error"
+    assert p["semantic_coverage"] == "incomplete" and p["analysis_complete"] is False
+    assert p["operational_status"] == "ok"
+    assert p["overall_risk"] == "medium" and p["exit_code"] == 1 and code == 1  # deterministic stands
+
+
+def test_judge_pass_disagreement_finding_surfaced(monkeypatch, capsys):
+    from scanner.remote_judge import JudgeResult
+    jr = JudgeResult(status="ok", findings=[_judge_finding("I8", "high", "judge_pass_disagreement")],
+                     model="m", passes=2, calls=2, disagreements=1)
+    code, term = _run(monkeypatch, capsys, _fetch_fixture("benign/first-party-sdk-llms.txt"),
+                      url="https://sdk.example.com", judge_flag=True, api_key="k",
+                      fake_judge=make_judge(default=jr))
+    assert "judge_pass_disagreement" in term
+    assert "disagreement" in term.lower()
+    assert "Semantic judge pass: OK" in term
+
+
+def test_judge_without_api_key_is_unavailable_not_destructive(monkeypatch, capsys):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # no fake_judge -> the REAL judge_document runs, finds no key
+    code, out = _run(monkeypatch, capsys, _fetch_fixture("suspicious/agent-tooling-llms.txt"),
+                     url="https://aitools.example", json_out=True, judge_flag=True)
+    p = json.loads(out)
+    assert p["judge_status"] == "unavailable:no_api_key"
+    assert p["analysis_complete"] is False
+    assert p["overall_risk"] == "medium" and p["exit_code"] == 1 and code == 1
+
+
+def test_judge_default_off_leaves_result_and_report_unchanged(monkeypatch, capsys):
+    # --judge absent: no judge_* keys anywhere, byte-identical to PR2
+    code, out = _run(monkeypatch, capsys, _fetch_fixture("suspicious/agent-tooling-llms.txt"),
+                     url="https://aitools.example", json_out=True)
+    p = json.loads(out)
+    assert "judge_status" not in p and "judge" not in p
+    assert "semantic_coverage" not in p and "analysis_complete" not in p
+    assert all("judge" not in d for d in p["documents"])
+    assert "LLM judge" not in out or "no LLM judge" in out
+
+
+def _fetch_findingless(url):
+    # a served document with no install commands and no referenced domains ->
+    # the deterministic lane produces zero findings
+    if url.endswith("/llms.txt"):
+        return _served("https://plain.example/llms.txt", b"# Plain docs\n\nJust prose, nothing to install.\n")
+    return FetchOutcome(url, None, 404, None, b"", None, "2026-08-27T00:00:00Z", error="HTTP 404")
+
+
+def test_no_findings_sentence_is_the_pinned_wording_without_judge(monkeypatch, capsys):
+    code, term = _run(monkeypatch, capsys, _fetch_findingless, url="https://plain.example")
+    assert "No rule-based or registry/DNS findings." in term
+    assert "No findings from any lane that ran." not in term
+
+
+def test_no_findings_sentence_widens_only_when_a_semantic_lane_ran(monkeypatch, capsys):
+    from scanner.remote_judge import JudgeResult
+
+    ran = JudgeResult(status="ok", findings=[], model="m", passes=2, calls=2, disagreements=0)
+    _, term = _run(monkeypatch, capsys, _fetch_findingless, url="https://plain.example",
+                   judge_flag=True, api_key="k", fake_judge=make_judge(default=ran))
+    assert "No findings from any lane that ran." in term
+    assert "No rule-based or registry/DNS findings." not in term
+
+    # judge requested but unavailable -> keep the deterministic wording; the
+    # coverage WARNING explains the judge did not run
+    failed = JudgeResult(status="unavailable:api_error", findings=[], model="m",
+                         passes=2, calls=1, disagreements=0)
+    _, term2 = _run(monkeypatch, capsys, _fetch_findingless, url="https://plain.example",
+                    judge_flag=True, api_key="k", fake_judge=make_judge(default=failed))
+    assert "No rule-based or registry/DNS findings." in term2
+    assert "No findings from any lane that ran." not in term2
+    assert "WARNING: --judge was requested" in term2
+
+
+def test_zero_documents_plus_judge_is_skipped_and_exit_3(monkeypatch, capsys):
+    code, out = _run(monkeypatch, capsys, _fetch_all_404, json_out=True,
+                     judge_flag=True, api_key="k", fake_judge=make_judge())
+    p = json.loads(out)
+    assert p["judge_status"] == "skipped:no_documents"
+    assert p["semantic_coverage"] == "incomplete" and p["analysis_complete"] is False
+    assert p["operational_status"] == "not_found"
+    assert p["overall_risk"] is None and p["exit_code"] == 3 and code == 3

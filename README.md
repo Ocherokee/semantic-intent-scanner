@@ -165,18 +165,30 @@ semantic-intent scan-remote https://example.com
 
 # JSON output
 semantic-intent scan-remote https://example.com --json
+
+# also run the two-pass LLM judge over the retrieved content (needs an API key)
+export ANTHROPIC_API_KEY=your_key_here
+semantic-intent scan-remote https://example.com --judge
 ```
 
 `scan-remote` fetches the site's `llms.txt` / `llms-full.txt` through the
 SSRF-hardened guarded path (HTTPS only, private/blocked address space refused,
 every redirect re-validated, body decompression capped) and runs **rule-based +
-external-state analysis only**: install commands and referenced domains are
+external-state analysis**: install commands and referenced domains are
 extracted and checked against live PyPI / npm / DNS state. It never executes a
-command, installs a package, follows an instruction found in the retrieved
-text, or calls an LLM. **The semantic judge pass over retrieved content is not
-part of this command — that is v0.4 PR3.** A `LOW` result means no rule-based or
-registry/DNS finding; it is not a safety guarantee, and registry existence is
+command, installs a package, or follows an instruction found in the retrieved
+text. A `LOW` result is not a safety guarantee, and registry existence is
 never treated as legitimacy.
+
+**`--judge`** adds a two-pass LLM evaluation of the retrieved content, treated
+as **untrusted evidence** (see `docs/v0.4-pr3-judge-scoping.md`). Pass 1
+reasons from the deterministic findings plus a bounded, quoted digest of the
+document's structure; Pass 2 reads the raw body inside a hard evidence
+boundary. The judge can **raise** the reported risk and exit code, never lower
+them; deterministic findings are immutable; and a judge failure (no key, API
+error) leaves the deterministic result intact and marks the semantic pass
+unavailable — it does **not** become an operational failure. Default
+`scan-remote` (no `--judge`) is unchanged.
 
 ### Exit codes
 
@@ -189,8 +201,13 @@ never treated as legitimacy.
 
 Exit codes enable use in CI/CD pipelines to block installation of flagged
 skills. For `scan-remote`, security risk (`overall_risk`) and operational
-failure (`operational_status`) are separate fields in the JSON output — a
-failed scan reports `"overall_risk": null`, never `"low"`.
+failure (`operational_status`) are separate JSON fields — a failed scan
+reports `"overall_risk": null`, never `"low"`. With `--judge`, a judge
+failure never changes the exit code; instead it surfaces as
+`"judge_status": "unavailable:<reason>"` / `"partial"`,
+`"semantic_coverage": "incomplete"` / `"partial"`, `"analysis_complete":
+false`, and a prominent terminal `WARNING`. Incomplete semantic coverage is a
+status fact, not a risk severity.
 
 ---
 
@@ -206,7 +223,10 @@ Skill package                     Retrieved remote document (v0.4)
   |                                  |   |- extract install commands / domains / execution framing
   |                                  |   +- registry.py: existence + provenance signal (PyPI/npm/DNS)
   |                                  |
-  Semantic Evaluator (v0.1)  <-------+  (judge pass consumes findings as evidence; PR3)
+  Semantic Evaluator (v0.1)          remote_judge.py  -- two-pass LLM judge (PR3, --judge)
+                                     |   Pass 1: deterministic findings + bounded claims digest
+                                     |   Pass 2: raw body inside a hard evidence boundary
+                                     +   findings block = trusted; content = untrusted evidence
   |- chunk SKILL.md
   |- evaluate against the invariants (LLM-as-judge)
   +- aggregate violations
@@ -318,7 +338,9 @@ different angles.
         model; `llms_txt` adapter; benign/suspicious/malicious fixtures (offline)
   - [x] PR2 — `scan-remote` CLI subcommand + terminal/JSON remote report;
         operational-failure exit code (3) kept distinct from risk
-  - [ ] PR3 — judge pass over retrieved content (findings block as evidence)
+  - [x] PR3 — `--judge`: two-pass LLM evaluation of retrieved content as
+        untrusted evidence (`remote_judge`); deterministic findings immutable,
+        judge raises only, judge failure ≠ operational failure
   - [ ] PR4 — MCP tool-description adapter
 - [ ] v0.5 — Benchmark against ToxicSkills dataset (Snyk, February 2026)
 - [ ] v0.6 — False positive analysis, threshold calibration

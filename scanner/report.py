@@ -231,6 +231,18 @@ _REMOTE_FOOTER = (
     "scan. A low result means no rule-based or registry/DNS finding - not a "
     "safety guarantee. Registry existence is never treated as legitimacy."
 )
+_REMOTE_FOOTER_JUDGE = (
+    "This scan performs rule-based + external-state (registry / DNS) analysis "
+    "and a two-pass LLM judge over the retrieved content. A low result is not "
+    "a safety guarantee; the judge may miss manipulation and a judge failure "
+    "leaves only the deterministic result. Registry existence is never treated "
+    "as legitimacy; retrieved content is evaluated as untrusted evidence, "
+    "never followed as instruction."
+)
+
+
+def _remote_footer(results: dict[str, Any]) -> str:
+    return _REMOTE_FOOTER_JUDGE if results.get("judge_status") not in (None, "skipped:no_documents") else _REMOTE_FOOTER
 
 _OPERATIONAL_MESSAGES = {
     "fetch_blocked": "Every candidate document was refused by the fetch guard.",
@@ -303,11 +315,58 @@ def _remote_finding_block(f: dict[str, Any], colorize: bool) -> list[str]:
     if f.get("observed_at"):
         meta += f"   Observed: {f['observed_at']}"
     out.append(f"     {meta}")
-    src = (f.get("detail") or {}).get("source_url")
-    if src:
-        out.append(f"     Source:     {src}")
+    detail = f.get("detail") or {}
+    if f.get("finding_type") == "judge_pass_disagreement":
+        p1 = (detail.get("pass1") or {}).get("verdict", "?")
+        p2 = (detail.get("pass2") or {}).get("verdict", "?")
+        out.append(f"     Passes:     Pass 1 said {p1}; Pass 2 said {p2} (disagreement -> escalated)")
+    if detail.get("source_url"):
+        out.append(f"     Source:     {detail['source_url']}")
     out.append("")
     return out
+
+
+def _remote_judge_lines(results: dict[str, Any], colorize: bool) -> list[str]:
+    """The 'Semantic judge pass' block. Empty when --judge was not used."""
+    status = results.get("judge_status")
+    if status is None:
+        return []
+    b, r = (BOLD, RESET) if colorize else ("", "")
+    coverage = results.get("semantic_coverage", "incomplete")
+    j = results.get("judge") or {}
+
+    def _warn() -> list[str]:
+        if coverage == "complete":
+            return []
+        reason = status if status != "partial" else "partial coverage across the retrieved documents"
+        return [
+            "",
+            f"{b}WARNING: --judge was requested but the semantic analysis did not fully complete{r}",
+            f"         (judge_status: {status}; semantic_coverage: {coverage}).",
+            "         The deterministic risk and exit code below are unaffected;"
+            " only the semantic pass is incomplete.",
+        ]
+
+    if status.startswith("skipped"):
+        return ["", f"{b}Semantic judge pass:{r} SKIPPED (no document to evaluate)"] + _warn()
+
+    label = {"ok": "OK", "partial": "PARTIAL"}.get(status, "UNAVAILABLE")
+    detail = ""
+    if status not in ("ok", "partial"):
+        detail = f" ({status.split(':', 1)[-1]})"
+    head = (
+        f"{b}Semantic judge pass:{r} {label}{detail}"
+        f"  (model {j.get('model', '?')}, {j.get('passes', 2)} passes, "
+        f"{j.get('calls', 0)} API call(s), {j.get('disagreements', 0)} disagreement(s))"
+    )
+    lines = ["", head]
+    for d in results.get("documents", []):
+        dj = d.get("judge")
+        if d.get("status") == 200 and dj:
+            st = dj.get("status", "?")
+            mark = "OK" if st == "ok" else f"UNAVAILABLE ({st.split(':', 1)[-1]})"
+            lines.append(f"  {d.get('requested_url', '?')}   judged: {mark}")
+    return lines + _warn()
 
 
 def _remote_notes(docs: list[dict[str, Any]]) -> list[str]:
@@ -335,12 +394,17 @@ def render_remote_report(
     findings = results.get("findings", [])
     status = remote_operational_status(results)
 
+    mode = "rule-based + external-state (registry / DNS)"
+    if results.get("judge_status") is not None:
+        mode += " + two-pass LLM judge over retrieved content"
+    else:
+        mode += "; no LLM judge"
     lines = [
         "",
         f"{b}Semantic Intent Scanner - Remote Content Audit{r}",
         f"Target: {target}",
         f"Timestamp: {_utc_now()}",
-        "Mode: remote - rule-based + external-state (registry / DNS); no LLM judge",
+        f"Mode: remote - {mode}",
         "",
         f"Documents attempted ({len(docs)}):",
     ]
@@ -356,15 +420,24 @@ def render_remote_report(
             "This is NOT a low-risk result - exit code 3.",
             "",
             "-" * 60,
-            _REMOTE_FOOTER,
+            _remote_footer(results),
             "",
         ]
         return "\n".join(lines)
 
+    lines += _remote_judge_lines(results, colorize)
+
     lines += ["", f"Overall risk: {_risk_label(results.get('overall_risk', 'low'), colorize)}", ""]
 
     if not findings:
-        lines.append("No rule-based or registry/DNS findings.")
+        # The deterministic wording is the pinned default. Only widen it when a
+        # semantic lane actually ran (ok / partial) — a requested-but-unavailable
+        # judge keeps the deterministic sentence and lets the coverage WARNING
+        # explain that the judge did not run.
+        if results.get("judge_status") in ("ok", "partial"):
+            lines.append("No findings from any lane that ran.")
+        else:
+            lines.append("No rule-based or registry/DNS findings.")
     else:
         ordered = sorted(findings, key=lambda f: -RISK_RANK.get(f.get("risk", "low"), 0))
         lines.append(f"Findings ({len(findings)}), worst first:")
@@ -378,12 +451,12 @@ def render_remote_report(
         lines.append("Notes:")
         lines += [f"  - {n}" for n in notes]
 
-    lines += ["", "-" * 60, _REMOTE_FOOTER, ""]
+    lines += ["", "-" * 60, _remote_footer(results), ""]
     return "\n".join(lines)
 
 
 def _remote_doc_json(d: dict[str, Any]) -> dict[str, Any]:
-    return {
+    out = {
         "requested_url": d.get("requested_url"),
         "final_url": d.get("final_url"),
         "status": d.get("status"),
@@ -397,6 +470,9 @@ def _remote_doc_json(d: dict[str, Any]) -> dict[str, Any]:
         "error": d.get("error"),
         "blocked_reason": d.get("blocked_reason"),
     }
+    if "judge" in d:
+        out["judge"] = d["judge"]   # {status, findings, calls, disagreements} | None
+    return out
 
 
 def render_remote_json_report(results: dict[str, Any], target: str) -> str:
@@ -417,6 +493,12 @@ def render_remote_json_report(results: dict[str, Any], target: str) -> str:
         "documents": [_remote_doc_json(d) for d in docs],
         "finding_count": len(results.get("findings", [])),
         "findings": results.get("findings", []),
-        "disclaimer": _REMOTE_FOOTER,
+        "disclaimer": _remote_footer(results),
     }
+    if results.get("judge_status") is not None:
+        report["judge_status"] = results["judge_status"]
+        report["semantic_coverage"] = results.get("semantic_coverage", "incomplete")
+        report["analysis_complete"] = report["semantic_coverage"] == "complete"
+        if "judge" in results:
+            report["judge"] = results["judge"]
     return json.dumps(report, indent=2)
