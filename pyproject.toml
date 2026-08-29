@@ -7,7 +7,7 @@ name = "semantic-intent-scanner"
 version = "0.4.0.dev0"
 description = "Invariant-grounded semantic evaluation for AI agent skill files and remote content"
 readme = "README.md"
-license = { text = "AGPL-3.0" }
+license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.25.0",
