@@ -23,12 +23,22 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .registry import RegistryClient
-from .remote_audit import RemoteDocument, analyze_document, findings_as_dicts, overall_risk
+from .remote_audit import (
+    Finding,
+    RemoteDocument,
+    analyze_document,
+    findings_as_dicts,
+    overall_risk,
+)
+from .remote_common import attach_judge
 from .remote_fetch import FetchOutcome, guarded_fetch
 
 CANDIDATE_PATHS = ("llms.txt", "llms-full.txt")
 
 Fetcher = Callable[[str], FetchOutcome]
+# (RemoteDocument, deterministic findings) -> a JudgeResult-shaped object with
+# .status / .findings / .model / .passes / .calls / .disagreements
+Judge = Callable[[RemoteDocument, "list[Finding]"], Any]
 
 
 def candidate_urls(target: str) -> list[str]:
@@ -47,6 +57,7 @@ def audit_llms_txt(
     *,
     registry: RegistryClient | None = None,
     fetch: Fetcher | None = None,
+    judge: Judge | None = None,
 ) -> dict[str, Any]:
     """
     Audit the llms.txt surface for ``target`` (a URL or a bare domain).
@@ -55,21 +66,34 @@ def audit_llms_txt(
     the SSRF-hardened :func:`scanner.remote_fetch.guarded_fetch`.
 
     Returns a dict shaped like ``directory_audit.audit_directory``:
-    ``{surface, source, documents[], findings[], overall_risk}``.
+    ``{surface, source, documents[], retrieved, findings[], overall_risk}``.
+    ``retrieved`` is the count of candidate documents that were actually
+    served (HTTP 200, no error) — a caller uses it to tell "scanned and
+    found nothing" apart from "nothing could be fetched".
+
+    ``judge`` (v0.4 PR3): an optional ``(RemoteDocument, deterministic
+    findings) -> JudgeResult`` callable. When ``judge is None`` (default) the
+    code path and result are **identical** to the deterministic-only scan —
+    no ``judge*`` keys are added. When provided, the two-pass semantic pass
+    runs over each served document; successful judge findings are merged into
+    ``findings`` (append-only), ``overall_risk`` is recomputed over the union,
+    and ``judge_status`` / ``judge`` / per-document ``documents[].judge`` are
+    added (see docs/v0.4-pr3-judge-scoping.md).
     """
     registry = registry or RegistryClient()
     fetch = fetch or guarded_fetch
 
     outcomes = [fetch(url) for url in candidate_urls(target)]
+    served = [o for o in outcomes if o.ok]
     result: dict[str, Any] = {
         "surface": "llms_txt",
         "source": target,
         "documents": [_document_summary(o) for o in outcomes],
+        "retrieved": len(served),
         "findings": [],
         "overall_risk": "low",
     }
 
-    served = [o for o in outcomes if o.ok]
     if not served:
         blocked = [o.blocked_reason for o in outcomes if o.blocked_reason]
         result["note"] = (
@@ -77,14 +101,29 @@ def audit_llms_txt(
             if blocked
             else "no llms.txt or llms-full.txt served (the common, safe case)"
         )
+        if judge is not None:
+            result["judge_status"] = "skipped:no_documents"
+            result["semantic_coverage"] = "incomplete"
         return result
 
-    findings = []
+    det_findings: list[Finding] = []
+    per_doc_judge: dict[str, Any] = {}  # requested_url -> JudgeResult
     for outcome in served:
-        findings.extend(analyze_document(RemoteDocument.from_fetch_outcome(outcome), registry))
+        doc = RemoteDocument.from_fetch_outcome(outcome)
+        d = analyze_document(doc, registry)
+        det_findings.extend(d)
+        if judge is not None:
+            per_doc_judge[outcome.requested_url] = judge(doc, d)
 
-    result["findings"] = findings_as_dicts(findings)
-    result["overall_risk"] = overall_risk(findings)
+    all_findings = list(det_findings)
+    if judge is not None:
+        for jr in per_doc_judge.values():
+            if getattr(jr, "status", None) == "ok":
+                all_findings.extend(jr.findings)
+        attach_judge(result, per_doc_judge)
+
+    result["findings"] = findings_as_dicts(all_findings)
+    result["overall_risk"] = overall_risk(all_findings)
     return result
 
 

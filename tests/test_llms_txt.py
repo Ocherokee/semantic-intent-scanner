@@ -129,3 +129,52 @@ def test_documents_carry_provenance():
     r = _audit("malicious/onboarding-llms-full.txt", "acme.example", served_path="llms-full.txt")
     served = [d for d in r["documents"] if d["status"] == 200]
     assert served and served[0]["sha256"] and served[0]["fetched_at"].endswith("Z")
+
+
+# ---------------------------------------------------------------------------
+# judge=None (default) must not change the result at all (v0.4 PR3 pin)
+# ---------------------------------------------------------------------------
+
+def test_default_no_judge_adds_no_keys():
+    served = _audit("suspicious/agent-tooling-llms.txt", "aitools.example")
+    assert not any(k.startswith(("judge", "semantic_coverage", "analysis_complete")) for k in served)
+    assert all("judge" not in d for d in served["documents"])
+
+    nothing = audit_llms_txt(
+        "nothing.example",
+        registry=RegistryClient.from_fixture(MOCK_REGISTRY),
+        fetch=lambda url: FetchOutcome(url, None, 404, None, b"", None, "2026-08-27T00:00:00Z", error="404"),
+    )
+    assert "judge_status" not in nothing
+
+
+def test_judge_none_result_is_identical_to_omitting_the_arg():
+    reg = RegistryClient.from_fixture(MOCK_REGISTRY)
+    f = _fetch_serving(FIX / "suspicious/agent-tooling-llms.txt", "llms.txt")
+    a = audit_llms_txt("aitools.example", registry=reg, fetch=f)
+    reg2 = RegistryClient.from_fixture(MOCK_REGISTRY)
+    f2 = _fetch_serving(FIX / "suspicious/agent-tooling-llms.txt", "llms.txt")
+    b = audit_llms_txt("aitools.example", registry=reg2, fetch=f2, judge=None)
+    assert a == b
+
+
+def test_adversarial_fixtures_are_low_for_the_deterministic_lane():
+    # These are the fixtures the judge is meant to catch: the deterministic
+    # lane sees nothing (real packages, resolving domains).
+    for rel, host in [("adversarial/situation-report-llms.txt", "docs.example.com"),
+                      ("adversarial/judge-injection-llms.txt", "docs.example.com")]:
+        r = _audit(rel, host)
+        assert r["overall_risk"] == "low", rel
+        assert "dangling_package" not in _types(r) and "dangling_domain" not in _types(r)
+
+
+def test_no_documents_plus_judge_marks_skipped():
+    r = audit_llms_txt(
+        "nothing.example",
+        registry=RegistryClient.from_fixture(MOCK_REGISTRY),
+        fetch=lambda url: FetchOutcome(url, None, 404, None, b"", None, "2026-08-27T00:00:00Z", error="404"),
+        judge=lambda doc, det: None,
+    )
+    assert r["judge_status"] == "skipped:no_documents"
+    assert r["semantic_coverage"] == "incomplete"
+    assert r["overall_risk"] == "low" and r["findings"] == []

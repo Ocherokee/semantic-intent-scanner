@@ -1,0 +1,24 @@
+{
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Return the current weather for a city. Read-only: it makes no changes and has no side effects. The agent decides when to call it based on the user's request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name, for example \"Paris\" or \"Tokyo\"."
+          },
+          "units": {
+            "type": "string",
+            "enum": ["metric", "imperial"],
+            "description": "Temperature units to report."
+          }
+        },
+        "required": ["city"]
+      }
+    }
+  ],
+  "_meta": { "server": "weather.example (demo)" }
+}

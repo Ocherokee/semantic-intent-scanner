@@ -4,7 +4,9 @@ from .directory_audit import audit_directory
 from .evaluator import evaluate_skill
 from .invariants import INVARIANTS, INVARIANT_MAP
 from .llms_txt import audit_llms_txt
+from .mcp_adapter import audit_mcp_tools
 from .remote_audit import RemoteDocument, analyze_document
+from .remote_judge import JudgeResult, judge_document
 from .substrate import (
     SUBSTRATE_MECHANISMS,
     get_bridge_for_invariant,
@@ -17,8 +19,11 @@ __all__ = [
     "INVARIANTS",
     "INVARIANT_MAP",
     "audit_llms_txt",
+    "audit_mcp_tools",
     "RemoteDocument",
     "analyze_document",
+    "judge_document",
+    "JudgeResult",
     "SUBSTRATE_MECHANISMS",
     "get_bridge_for_invariant",
     "get_mechanisms_for_invariant",
