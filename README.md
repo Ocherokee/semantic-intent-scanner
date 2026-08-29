@@ -190,6 +190,32 @@ error) leaves the deterministic result intact and marks the semantic pass
 unavailable — it does **not** become an operational failure. Default
 `scan-remote` (no `--judge`) is unchanged.
 
+### Scan MCP tool descriptions (`scan-mcp`, v0.4)
+
+```bash
+# a captured tools/list JSON file — no MCP server is contacted
+semantic-intent scan-mcp ./captured-tools-list.json
+semantic-intent scan-mcp ./captured-tools-list.json --json
+semantic-intent scan-mcp ./captured-tools-list.json --judge --server-label "acme-mcp"
+```
+
+An MCP server returns a `tools/list` response — an array of
+`{name, description, inputSchema}` — that an agent loads into its context as
+its own trusted capabilities. `scan-mcp` reads that JSON **from a file**
+(bare array, `{"tools": […]}`, or a JSON-RPC envelope), normalises every
+`description` — the tool description and **every nested `description` in
+`inputSchema`**, wherever it sits — and runs each through the same engine as
+`scan-remote`: deterministic per field, and the two-pass judge over each
+tool's combined text with `--judge`. Every finding records `mcp_tool`, a
+friendly `mcp_field` (`parameters.files.items.description`), a lossless
+`mcp_json_path` (`inputSchema.properties.files.items.description` —
+collision-resistant when two schema locations share a friendly path), and
+`mcp_server: {declared, authenticated: false}` — the file is not an
+authenticated identity. No MCP server is contacted, no transport is opened,
+no tool is invoked. Malformed / empty input is exit 3 with
+`operational_status` `invalid_input` / `no_tools` (not HTTP vocabulary). See
+`docs/v0.4-pr4-mcp-adapter-scoping.md`.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -197,7 +223,7 @@ unavailable — it does **not** become an operational failure. Default
 | 0 | Low risk — no blocking findings |
 | 1 | Medium risk — possible violations |
 | 2 | High or critical risk — likely violations |
-| 3 | `scan-remote` only: nothing could be scanned — every candidate fetch failed, was blocked, or was not found. **Not** a low-risk result. |
+| 3 | `scan-remote` / `scan-mcp` only: nothing could be scanned — every candidate fetch failed / was blocked / not found, or the MCP file was invalid / held no tools. **Not** a low-risk result. |
 
 Exit codes enable use in CI/CD pipelines to block installation of flagged
 skills. For `scan-remote`, security risk (`overall_risk`) and operational
@@ -214,12 +240,13 @@ status fact, not a risk severity.
 ## Architecture
 
 ```
-Skill package                     Retrieved remote document (v0.4)
-  |                                  |  llms.txt / llms-full.txt  (MCP tool descriptions: PR4)
-  Directory Audit (v0.3)             remote_fetch.py  -- SSRF-hardened GET (per-hop IP validation,
-  |- test file detection             |                   pinned-IP connect, no cross-origin creds,
-  |- config file evaluation          |                   decompressed-size cap)
-  +- dangerous pattern scan          remote_audit.py  -- analyze_document(): format-agnostic
+Skill package                     External semantic content (v0.4)
+  |                                  |  llms.txt / llms-full.txt      (scan-remote -> llms_txt.py)
+  Directory Audit (v0.3)             |  MCP tools/list JSON file       (scan-mcp   -> mcp_adapter.py)
+  |- test file detection             remote_fetch.py  -- SSRF-hardened GET (per-hop IP validation,
+  |- config file evaluation          |                   pinned-IP connect, no cross-origin creds,
+  +- dangerous pattern scan          |                   decompressed-size cap)   [scan-remote only]
+  |                                  remote_audit.py  -- analyze_document(): format-agnostic
   |                                  |   |- extract install commands / domains / execution framing
   |                                  |   +- registry.py: existence + provenance signal (PyPI/npm/DNS)
   |                                  |
@@ -302,8 +329,8 @@ still has no defence-in-depth against content crafted to fool the judge itself.
 | Instruction layer | Malicious SKILL.md | Snyk ToxicSkills, Feb 2026 | Semantic evaluation |
 | Test file layer | Bundled *.test.ts / conftest.py | Gecko Security, May 2026 | Directory audit |
 | Config layer | .mcp.json / .claude/settings.json | Adversa AI TrustFall, May 2026 | Directory audit |
-| Remote docs layer | llms.txt / llms-full.txt naming unregistered or unverified packages/domains | Ars Technica, Aug 2026 | Remote audit (rule-based + external-state) |
-| MCP tool layer | Injection in a server's tool `description` fields | — | Planned, v0.4 PR4 |
+| Remote docs layer | llms.txt / llms-full.txt naming unregistered or unverified packages/domains | Ars Technica, Aug 2026 | `scan-remote` — remote audit (rule-based + external-state), optional two-pass judge |
+| MCP tool layer | Injection in a tool `description` / nested `inputSchema` description | — | `scan-mcp` — same engine over a captured `tools/list` file (offline; no MCP client) |
 
 ---
 
@@ -341,7 +368,9 @@ different angles.
   - [x] PR3 — `--judge`: two-pass LLM evaluation of retrieved content as
         untrusted evidence (`remote_judge`); deterministic findings immutable,
         judge raises only, judge failure ≠ operational failure
-  - [ ] PR4 — MCP tool-description adapter
+  - [x] PR4 — `scan-mcp`: MCP tool-description adapter over a captured
+        `tools/list` file; per-field deterministic lane + combined-tool judge
+        lane, no MCP client; recursive nested-`description` extraction
 - [ ] v0.5 — Benchmark against ToxicSkills dataset (Snyk, February 2026)
 - [ ] v0.6 — False positive analysis, threshold calibration
 - [ ] v0.7 — Relational integrity monitor (conversational trajectory evaluation)

@@ -30,6 +30,7 @@ from .remote_audit import (
     findings_as_dicts,
     overall_risk,
 )
+from .remote_common import attach_judge
 from .remote_fetch import FetchOutcome, guarded_fetch
 
 CANDIDATE_PATHS = ("llms.txt", "llms-full.txt")
@@ -119,57 +120,11 @@ def audit_llms_txt(
         for jr in per_doc_judge.values():
             if getattr(jr, "status", None) == "ok":
                 all_findings.extend(jr.findings)
-        _attach_judge(result, per_doc_judge)
+        attach_judge(result, per_doc_judge)
 
     result["findings"] = findings_as_dicts(all_findings)
     result["overall_risk"] = overall_risk(all_findings)
     return result
-
-
-def _rollup_judge_status(judge_results: list[Any]) -> str:
-    statuses = [getattr(jr, "status", "unavailable:api_error") for jr in judge_results]
-    if not statuses:
-        return "ok"
-    if all(s == "ok" for s in statuses):
-        return "ok"
-    if any(s == "ok" for s in statuses):
-        return "partial"
-    distinct = set(statuses)
-    return distinct.pop() if len(distinct) == 1 else "partial"
-
-
-def _coverage_for(judge_status: str) -> str:
-    """Coarse 'did the requested semantic analysis complete?' signal, easy for
-    CI to gate on. Separate from judge_status (which carries the reason)."""
-    if judge_status == "ok":
-        return "complete"
-    if judge_status == "partial":
-        return "partial"
-    return "incomplete"  # unavailable:* or skipped:*
-
-
-def _attach_judge(result: dict[str, Any], per_doc_judge: dict[str, Any]) -> None:
-    jrs = list(per_doc_judge.values())
-    result["judge_status"] = _rollup_judge_status(jrs)
-    result["semantic_coverage"] = _coverage_for(result["judge_status"])
-    model = next((getattr(jr, "model", None) for jr in jrs if getattr(jr, "model", None)), None)
-    result["judge"] = {
-        "model": model,
-        "passes": 2,
-        "calls": sum(int(getattr(jr, "calls", 0) or 0) for jr in jrs),
-        "disagreements": sum(int(getattr(jr, "disagreements", 0) or 0) for jr in jrs),
-    }
-    for dsumm in result["documents"]:
-        jr = per_doc_judge.get(dsumm["requested_url"])
-        if dsumm["status"] == 200 and jr is not None:
-            dsumm["judge"] = {
-                "status": getattr(jr, "status", None),
-                "findings": len(getattr(jr, "findings", []) or []),
-                "calls": int(getattr(jr, "calls", 0) or 0),
-                "disagreements": int(getattr(jr, "disagreements", 0) or 0),
-            }
-        else:
-            dsumm["judge"] = None
 
 
 def _document_summary(o: FetchOutcome) -> dict:

@@ -239,29 +239,47 @@ _REMOTE_FOOTER_JUDGE = (
     "as legitimacy; retrieved content is evaluated as untrusted evidence, "
     "never followed as instruction."
 )
+_MCP_FOOTER = (
+    "This scan reads MCP tool definitions from a file and evaluates every "
+    "description field against the invariant set (rule-based + external-state, "
+    "plus the two-pass judge with --judge). No MCP server is contacted and no "
+    "tool is invoked. A tool description is untrusted external content, never "
+    "authoritative instruction; a low result is not a safety guarantee."
+)
 
 
 def _remote_footer(results: dict[str, Any]) -> str:
+    if results.get("surface") == "mcp":
+        return _MCP_FOOTER
     return _REMOTE_FOOTER_JUDGE if results.get("judge_status") not in (None, "skipped:no_documents") else _REMOTE_FOOTER
 
 _OPERATIONAL_MESSAGES = {
     "fetch_blocked": "Every candidate document was refused by the fetch guard.",
     "not_found": "No candidate document was served (all returned 404 / not found).",
     "fetch_failed": "Every candidate fetch failed.",
+    "invalid_input": "The input is not valid JSON or not a recognised tools/list shape.",
+    "no_tools": "The input parsed, but no tool definitions were found to evaluate.",
 }
 
 
 def remote_operational_status(results: dict[str, Any]) -> str:
     """
-    Classify a `scanner.llms_txt.audit_llms_txt` result.
+    Classify an ``audit_llms_txt`` / ``audit_mcp_tools`` result.
 
-    "ok"            -> at least one supported document was retrieved and analysed
-    "fetch_blocked" -> nothing retrieved; at least one attempt hit the SSRF guard
-    "not_found"     -> nothing retrieved; every attempt was a 404 / not served
-    "fetch_failed"  -> nothing retrieved; some other fetch error on every attempt
+    "ok"            -> at least one document / tool was analysed
+    "fetch_blocked" -> (llms.txt) nothing retrieved; an attempt hit the SSRF guard
+    "not_found"     -> (llms.txt) nothing retrieved; every attempt 404 / not served
+    "fetch_failed"  -> (llms.txt) nothing retrieved; some other fetch error
+    "invalid_input" -> (mcp) the file is not valid JSON / not a tools/list shape
+    "no_tools"      -> (mcp) the file parsed but held no tool definitions
+
+    The exit code is the same in every non-"ok" case (3, "nothing analysed");
+    only the vocabulary differs so an MCP failure does not report HTTP words.
     """
     if results.get("retrieved", 0) > 0:
         return "ok"
+    if results.get("surface") == "mcp":
+        return "invalid_input" if results.get("parse_error") else "no_tools"
     docs = results.get("documents", [])
     if any(d.get("blocked_reason") for d in docs):
         return "fetch_blocked"
@@ -298,7 +316,8 @@ def _remote_doc_line(d: dict[str, Any]) -> str:
         return f"{url}  200  sha256:{sha}...  {d.get('fetched_at', '?')}{flags}"
     if status:
         return f"{url}  {status}  (not served)"
-    return f"{url}  FETCH FAILED - {d.get('error') or 'unknown error'}"
+    label = "MALFORMED" if d.get("kind") == "mcp_tool" else "FETCH FAILED"
+    return f"{url}  {label} - {d.get('error') or 'unknown error'}"
 
 
 def _remote_finding_block(f: dict[str, Any], colorize: bool) -> list[str]:
@@ -394,22 +413,29 @@ def render_remote_report(
     findings = results.get("findings", [])
     status = remote_operational_status(results)
 
+    is_mcp = results.get("surface") == "mcp"
+    title = "MCP Tool-Description Audit" if is_mcp else "Remote Content Audit"
+    mode_kind = "mcp" if is_mcp else "remote"
+    attempted_label = "Tools evaluated" if is_mcp else "Documents attempted"
+    retrieved_label = "Parsed" if is_mcp else "Retrieved"
+    subject = "tool" if is_mcp else "document"
+
     mode = "rule-based + external-state (registry / DNS)"
     if results.get("judge_status") is not None:
-        mode += " + two-pass LLM judge over retrieved content"
+        mode += " + two-pass LLM judge over " + ("tool descriptions" if is_mcp else "retrieved content")
     else:
         mode += "; no LLM judge"
     lines = [
         "",
-        f"{b}Semantic Intent Scanner - Remote Content Audit{r}",
+        f"{b}Semantic Intent Scanner - {title}{r}",
         f"Target: {target}",
         f"Timestamp: {_utc_now()}",
-        f"Mode: remote - {mode}",
+        f"Mode: {mode_kind} - {mode}",
         "",
-        f"Documents attempted ({len(docs)}):",
+        f"{attempted_label} ({len(docs)}):",
     ]
     lines += [f"  {_remote_doc_line(d)}" for d in docs]
-    lines += ["", f"Retrieved: {results.get('retrieved', 0)} / {len(docs)}"]
+    lines += ["", f"{retrieved_label}: {results.get('retrieved', 0)} / {len(docs)}"]
 
     if status != "ok":
         header = "OPERATIONAL FAILURE"
@@ -470,6 +496,10 @@ def _remote_doc_json(d: dict[str, Any]) -> dict[str, Any]:
         "error": d.get("error"),
         "blocked_reason": d.get("blocked_reason"),
     }
+    if d.get("kind") == "mcp_tool":
+        out["mcp_tool"] = d.get("mcp_tool")
+        out["mcp_fields"] = d.get("mcp_fields", [])
+        out["mcp_json_paths"] = d.get("mcp_json_paths", [])
     if "judge" in d:
         out["judge"] = d["judge"]   # {status, findings, calls, disagreements} | None
     return out
@@ -479,10 +509,11 @@ def render_remote_json_report(results: dict[str, Any], target: str) -> str:
     status = remote_operational_status(results)
     scanned = status == "ok"
     docs = results.get("documents", [])
+    is_mcp = results.get("surface") == "mcp"
     report = {
         "scanner": "semantic-intent-scanner",
         "version": SCANNER_VERSION,
-        "scan_mode": "remote",
+        "scan_mode": "mcp" if is_mcp else "remote",
         "target": target,
         "timestamp": _utc_now(),
         "operational_status": status,
@@ -495,6 +526,8 @@ def render_remote_json_report(results: dict[str, Any], target: str) -> str:
         "findings": results.get("findings", []),
         "disclaimer": _remote_footer(results),
     }
+    if is_mcp:
+        report["mcp_server"] = results.get("mcp_server", {"declared": None, "authenticated": False})
     if results.get("judge_status") is not None:
         report["judge_status"] = results["judge_status"]
         report["semantic_coverage"] = results.get("semantic_coverage", "incomplete")

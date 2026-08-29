@@ -20,6 +20,7 @@ from pathlib import Path
 from .directory_audit import audit_directory
 from .evaluator import evaluate_skill
 from .llms_txt import audit_llms_txt
+from .mcp_adapter import audit_mcp_tools
 from .report import (
     remote_exit_code,
     render_directory_report,
@@ -160,6 +161,45 @@ def cmd_scan_remote(args: argparse.Namespace) -> int:
     return remote_exit_code(results)
 
 
+def cmd_scan_mcp(args: argparse.Namespace) -> int:
+    """
+    Scan MCP tool definitions from a captured ``tools/list`` JSON file.
+
+    Every tool ``description`` (and every nested ``description`` in an
+    ``inputSchema``) is evaluated against the invariant set as untrusted
+    external content. `--judge` adds the two-pass LLM judge over each tool's
+    combined text. No MCP server is contacted, no transport is opened, no tool
+    is invoked. A judge failure leaves the deterministic result intact.
+    """
+    path = Path(args.file)
+    if not path.is_file():
+        print(f"Error: file not found: {path}", file=sys.stderr)
+        return 1
+
+    use_judge = getattr(args, "judge", False)
+    print(f"Reading MCP tool definitions from {path} …", file=sys.stderr)
+    print(
+        "(offline: no MCP server contacted, no tool invoked, no transport opened"
+        + ("; tool descriptions evaluated as untrusted evidence)" if use_judge else "; no LLM judge)"),
+        file=sys.stderr,
+    )
+
+    judge_cb = None
+    if use_judge:
+        from .remote_judge import judge_document
+
+        judge_cb = lambda doc, det: judge_document(doc, det, api_key=args.api_key)  # noqa: E731
+
+    results = audit_mcp_tools(str(path), judge=judge_cb, server_label=args.server_label)
+
+    if args.json:
+        print(render_remote_json_report(results, str(path)))
+    else:
+        print(render_remote_report(results, str(path), colorize=not args.no_color))
+
+    return remote_exit_code(results)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="semantic-intent",
@@ -197,12 +237,37 @@ def main() -> None:
         help="Anthropic API key for --judge (defaults to ANTHROPIC_API_KEY env var)",
     )
 
+    mcp_parser = subparsers.add_parser(
+        "scan-mcp",
+        help="Scan MCP tool descriptions from a captured tools/list JSON file",
+    )
+    mcp_parser.add_argument("file", help="Path to a tools/list JSON file (offline; no server is contacted)")
+    mcp_parser.add_argument("--json", action="store_true", help="Output JSON report")
+    mcp_parser.add_argument("--no-color", action="store_true", help="Disable color output")
+    mcp_parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Also run the two-pass LLM judge over each tool's description text (needs an API key)",
+    )
+    mcp_parser.add_argument(
+        "--api-key",
+        default=None,
+        help="Anthropic API key for --judge (defaults to ANTHROPIC_API_KEY env var)",
+    )
+    mcp_parser.add_argument(
+        "--server-label",
+        default=None,
+        help="Name of the MCP server the file came from (provenance only; not authenticated)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "scan":
         sys.exit(cmd_scan(args))
     if args.command == "scan-remote":
         sys.exit(cmd_scan_remote(args))
+    if args.command == "scan-mcp":
+        sys.exit(cmd_scan_mcp(args))
 
 
 if __name__ == "__main__":
