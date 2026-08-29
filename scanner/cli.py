@@ -12,6 +12,8 @@ Usage:
     semantic-intent scan-remote <url> --json   Output JSON report
 
     semantic-intent inventory <url>            Inventory public agent-readable surfaces as JSON
+    semantic-intent inventory-diff <previous.json> <current.json>
+                                                Compare two inventory artifacts offline
 """
 
 import argparse
@@ -21,6 +23,7 @@ from pathlib import Path
 
 from .directory_audit import audit_directory
 from .evaluator import evaluate_skill
+from .inventory_diff import compare_inventories, serialize_change_set
 from .llms_txt import audit_llms_txt
 from .mcp_adapter import audit_mcp_tools
 from .report import (
@@ -219,6 +222,31 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reject_nonfinite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is not allowed: {value}")
+
+
+def cmd_inventory_diff(args: argparse.Namespace) -> int:
+    """Compare two local inventory artifacts without discovery or analysis."""
+    previous_path = Path(args.previous)
+    current_path = Path(args.current)
+    try:
+        previous = json.loads(
+            previous_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_json,
+        )
+        current = json.loads(
+            current_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_json,
+        )
+        change_set = compare_inventories(previous, current)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 3
+    print(serialize_change_set(change_set))
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="semantic-intent",
@@ -285,6 +313,13 @@ def main() -> None:
     )
     inventory_parser.add_argument("url", help="Site or base URL, e.g. https://example.com")
 
+    diff_parser = subparsers.add_parser(
+        "inventory-diff",
+        help="Compare two inventory JSON artifacts (offline; no risk analysis)",
+    )
+    diff_parser.add_argument("previous", help="Path to the previous inventory JSON artifact")
+    diff_parser.add_argument("current", help="Path to the current inventory JSON artifact")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -295,6 +330,8 @@ def main() -> None:
         sys.exit(cmd_scan_mcp(args))
     if args.command == "inventory":
         sys.exit(cmd_inventory(args))
+    if args.command == "inventory-diff":
+        sys.exit(cmd_inventory_diff(args))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,13 @@ from .finding_contract import (
     validate_finding_contract,
 )
 from .invariants import INVARIANTS, INVARIANT_MAP
+from .inventory_diff import (
+    CHANGE_SCHEMA_VERSION,
+    InventoryChangeSet,
+    compare_inventories,
+    serialize_change_set,
+    validate_change_set,
+)
 from .llms_txt import audit_llms_txt
 from .mcp_adapter import audit_mcp_tools
 from .remote_audit import RemoteDocument, analyze_document
@@ -43,6 +50,11 @@ __all__ = [
     "validate_finding_contract",
     "INVARIANTS",
     "INVARIANT_MAP",
+    "CHANGE_SCHEMA_VERSION",
+    "InventoryChangeSet",
+    "compare_inventories",
+    "serialize_change_set",
+    "validate_change_set",
     "audit_llms_txt",
     "audit_mcp_tools",
     "RemoteDocument",
