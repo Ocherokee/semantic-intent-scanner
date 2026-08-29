@@ -131,6 +131,23 @@ def test_content_type_and_digest_changes_are_separate_facts():
     ]
 
 
+def test_missing_digest_is_not_treated_as_a_comparable_content_change():
+    previous = _entry()
+    current = _entry()
+    del current["observation"]["sha256"]
+    assert compare_inventories(_inventory(previous), _inventory(current)).changes == ()
+
+
+def test_digest_change_validation_requires_values_on_both_sides():
+    previous = _entry()
+    current = _entry()
+    current["observation"]["sha256"] = "b" * 64
+    payload = change_set_as_dict(compare_inventories(_inventory(previous), _inventory(current)))
+    payload["changes"][0]["current"] = {"sha256": None}
+    with pytest.raises(ChangeValidationError, match="requires comparable"):
+        validate_change_set(payload)
+
+
 def test_provenance_change_is_set_order_independent():
     previous = _entry()
     previous["discovery"] = [
@@ -171,6 +188,20 @@ def test_metadata_key_order_is_irrelevant_but_values_are_compared():
     assert _types(compare_inventories(_inventory(previous), _inventory(current))) == [
         "metadata_changed"
     ]
+
+
+def test_nested_metadata_object_order_is_irrelevant():
+    previous = _entry()
+    previous["metadata"] = {
+        "outer": {"alpha": 1, "beta": {"left": True, "right": False}},
+        "items": [{"name": "one", "value": 1}],
+    }
+    current = copy.deepcopy(previous)
+    current["metadata"] = {
+        "items": [{"value": 1, "name": "one"}],
+        "outer": {"beta": {"right": False, "left": True}, "alpha": 1},
+    }
+    assert compare_inventories(_inventory(previous), _inventory(current)).changes == ()
 
 
 def test_inventory_and_retrieval_truncation_changes_are_distinct():
@@ -215,12 +246,38 @@ def test_input_entry_order_does_not_affect_output():
     assert compare_inventories(forward, reverse).changes == ()
 
 
+def test_nonempty_diff_is_byte_identical_under_input_reordering():
+    first = _entry("https://example.com/llms.txt")
+    second = _entry("https://example.com/llms-full.txt")
+    third = _entry("https://example.com/new/llms.txt")
+    changed_first = copy.deepcopy(first)
+    changed_first["metadata"] = {"state": "current"}
+    forward = compare_inventories(_inventory(first, second), _inventory(changed_first, third))
+    reverse = compare_inventories(
+        _inventory(copy.deepcopy(second), copy.deepcopy(first)),
+        _inventory(copy.deepcopy(third), copy.deepcopy(changed_first)),
+    )
+    assert serialize_change_set(forward) == serialize_change_set(reverse)
+
+
 def test_explicit_ports_participate_in_exact_identity():
     previous = _entry("https://example.com:8443/llms.txt")
     current = _entry("https://example.com:9443/llms.txt")
     result = compare_inventories(
         _inventory(previous, origin="https://example.com:8443"),
         _inventory(current, origin="https://example.com:8443"),
+    )
+    assert _types(result) == ["surface_removed", "surface_added"]
+
+
+@pytest.mark.parametrize("current_url", [
+    "https://example.com/other/llms.txt",
+    "https://example.com/llms.txt?variant=full",
+])
+def test_paths_and_queries_participate_in_exact_identity(current_url):
+    result = compare_inventories(
+        _inventory(_entry("https://example.com/llms.txt")),
+        _inventory(_entry(current_url)),
     )
     assert _types(result) == ["surface_removed", "surface_added"]
 
@@ -266,6 +323,9 @@ def test_comparison_does_not_mutate_or_share_with_inputs():
     payload = change_set_as_dict(result)
     payload["changes"][0]["current"]["nested"]["value"] = "mutated"
     assert result.changes[0].current == {"nested": {"value": "current"}}
+    assert serialize_change_set(result) == serialize_change_set(result)
+    assert previous == before_previous
+    assert current == before_current
 
 
 def test_empty_inventories_are_valid_and_deterministic():

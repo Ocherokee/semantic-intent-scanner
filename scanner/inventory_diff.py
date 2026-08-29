@@ -241,6 +241,20 @@ def validate_change_set(value: InventoryChangeSet | Mapping[str, Any]) -> None:
                 raise ChangeValidationError(f"{path} must compare two different booleans")
         elif change["previous"] == change["current"]:
             raise ChangeValidationError(f"{path} previous and current must differ")
+        if change_type == "content_digest_changed":
+            previous_digest = change["previous"]
+            current_digest = change["current"]
+            if (
+                not isinstance(previous_digest, Mapping)
+                or not isinstance(current_digest, Mapping)
+                or not isinstance(previous_digest.get("sha256"), str)
+                or not isinstance(current_digest.get("sha256"), str)
+                or not previous_digest["sha256"]
+                or not current_digest["sha256"]
+            ):
+                raise ChangeValidationError(
+                    f"{path} requires comparable previous and current SHA-256 values"
+                )
         _json_compatible(change["previous"], f"{path}.previous")
         _json_compatible(change["current"], f"{path}.current")
         if change_type in {"surface_added", "surface_removed"}:
@@ -358,7 +372,6 @@ def compare_inventories(
         ("retrieval_status_changed", ("status", "http_status")),
         ("redirect_behavior_changed", ("final_url", "redirect_chain", "cross_origin_redirect")),
         ("content_type_changed", ("content_type",)),
-        ("content_digest_changed", ("sha256",)),
         ("retrieval_truncation_changed", ("truncated",)),
         ("retrieval_error_changed", ("error", "blocked_reason")),
     )
@@ -373,6 +386,18 @@ def compare_inventories(
                 changes.append(_change(
                     change_type, identity, paths, previous_value, current_value,
                 ))
+
+        previous_digest = previous_entry["observation"].get("sha256")
+        current_digest = current_entry["observation"].get("sha256")
+        if (
+            previous_digest is not None
+            and current_digest is not None
+            and previous_digest != current_digest
+        ):
+            changes.append(_change(
+                "content_digest_changed", identity, ("observation.sha256",),
+                {"sha256": previous_digest}, {"sha256": current_digest},
+            ))
 
         previous_discovery = _sorted_records(previous_entry["discovery"])
         current_discovery = _sorted_records(current_entry["discovery"])
