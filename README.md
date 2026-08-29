@@ -30,6 +30,9 @@ semantic-intent scan-mcp ./captured-tools-list.json
 
 # Inventory a site's agent-readable attack surface without scoring it
 semantic-intent inventory https://example.com
+
+# Compare two saved inventories offline without assigning risk
+semantic-intent inventory-diff previous.json current.json
 ```
 
 Run it against the repo's own fixtures to see a real offline detection in a few
@@ -108,6 +111,7 @@ The scanner now answers several questions, not one.
 **v0.4 adds:** Is external semantic content being allowed to direct behavior or extend trust without a trust decision — including remote documents and MCP tool metadata?
 **v0.5 adds:** Can findings be exchanged and retested without coupling them to one scanner implementation?
 **v0.6 adds:** What agent-readable surfaces does a site expose, how were they discovered, and what do they declare?
+**v0.7 adds:** What factual surface state changed between two validated inventory artifacts?
 
 ---
 
@@ -431,9 +435,10 @@ reach it.
   - [x] PR4 — `scan-mcp` adapter for captured MCP `tools/list` metadata
 - [x] v0.5 — Stable machine-readable finding contract (`schema_version: "0.1"`)
 - [x] v0.6 — Agent-readable attack-surface inventory (`inventory_schema_version: "0.1"`)
-- [ ] v0.7 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
-- [ ] v0.8 — False-positive analysis, threshold calibration
-- [ ] v0.9 — Relational integrity monitor (conversational trajectory evaluation)
+- [x] v0.7 — Deterministic inventory baselines and change detection (`change_schema_version: "0.1"`)
+- [ ] v0.8 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
+- [ ] v0.9 — False-positive analysis, threshold calibration
+- [ ] v0.10 — Relational integrity monitor (conversational trajectory evaluation)
 - [ ] v1.0 — Publishable research findings
 
 The v0.5 contract is independently versioned from the scanner package and
@@ -447,6 +452,11 @@ The v0.6 inventory is also independently versioned. It records factual surface
 observations, discovery provenance, and declared relationships without creating
 findings or changing risk. See
 [`docs/v0.6-agent-surface-inventory.md`](docs/v0.6-agent-surface-inventory.md).
+
+The v0.7 offline comparison layer validates two inventory artifacts and reports
+only deterministic factual changes. It does not retrieve resources, create
+findings, or interpret security impact. See
+[`docs/v0.7-inventory-baselines.md`](docs/v0.7-inventory-baselines.md).
 
 **The next priority is empirical, not conceptual:** benchmark the frozen I1–I8
 system, characterize false positives and false negatives, and calibrate risk
