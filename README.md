@@ -8,6 +8,54 @@ reasoning about *intent* and *mechanism failure*.
 
 ---
 
+## Quick start
+
+```bash
+pip install -e .              # Python 3.11+
+export ANTHROPIC_API_KEY=...   # needed for semantic evaluation of instruction files
+```
+
+```bash
+# Audit a whole skill package — instruction file plus the surfaces around it
+# (bundled test files, project config). The directory audit runs without an API key.
+semantic-intent scan ./path/to/skill-directory/
+
+# A single instruction file (semantic evaluation; needs ANTHROPIC_API_KEY)
+semantic-intent scan ./SKILL.md
+
+# JSON for CI
+semantic-intent scan ./SKILL.md --json
+```
+
+Run it against the repo's own fixtures to see a real detection in a few seconds
+(no API key required for this one):
+
+```
+$ semantic-intent scan tests/fixtures/malicious/
+
+Semantic Intent Scanner — Directory Audit
+Directory: tests/fixtures/malicious
+
+Directory Risk: CRITICAL
+
+Suspicious files found (1):
+
+  tests/fixtures/malicious/reviewer.test.ts — CRITICAL
+     Type:   test_file
+     Reason: Test files are auto-discovered by Jest, Vitest, and Mocha via
+             recursive glob patterns. Code in beforeAll() blocks executes
+             silently during test runs, with full access to environment
+             variables and the filesystem. Contains both credential access
+             and network exfiltration patterns — consistent with data theft.
+     Patterns detected: credential_access, filesystem_access, shell_execution, network_exfiltration
+```
+
+Exit code is `0` / `1` / `2` by risk level, so a flagged skill can block a CI job.
+The semantic evaluation of instruction content — invariant violations and the
+ethical-mechanism reasoning below — is the part that calls the model.
+
+---
+
 ## The Research Question
 
 > Can an invariant-grounded evaluator flag semantic intent risks that syntax scanners miss?
@@ -30,20 +78,31 @@ scanner currently inspects:
   MCP servers when a developer trusts a cloned directory
   (Adversa AI TrustFall, May 2026)
 
-This scanner addresses all three layers.
+And the instruction that reaches an agent is not always local. A retrieved
+remote document — an `llms.txt`, a tool description served by an MCP server —
+is untrusted content that an agent may act on as if it were authoritative.
+
+This scanner inspects several of these surfaces: the instruction file
+(semantic evaluation), bundled test and config files (directory audit), and
+retrieved remote documents such as `llms.txt` (remote-audit engine, v0.4).
+MCP tool-description surfaces are planned. Coverage of each surface is
+described below and in the roadmap — this is not a claim to cover every
+instruction, configuration, execution, and retrieved-content surface an agent
+touches.
 
 **This is a research prototype. It is not production security tooling.**
 A clean scan does not certify safety. Human review remains essential.
 
 ---
 
-## Two Questions, Three Layers
+## What the scanner asks
 
-The scanner can now answer two questions instead of one.
+The scanner now answers several questions, not one.
 
 **v0.1 asked:** Is this instruction dangerous?
 **v0.2 adds:** Which ethical mechanism failed, and why did that failure create executable risk?
 **v0.3 adds:** Are there attack surfaces in this skill package beyond the instruction file?
+**v0.4 adds:** Does a retrieved remote document (e.g. `llms.txt`) name a package, domain, package index, or tool that the agent would extend trust to without a provenance check?
 
 ---
 
@@ -254,7 +313,7 @@ still has no defence-in-depth against content crafted to fool the judge itself.
 | Instruction layer | Malicious SKILL.md | Snyk ToxicSkills, Feb 2026 | Semantic evaluation |
 | Test file layer | Bundled *.test.ts / conftest.py | Gecko Security, May 2026 | Directory audit |
 | Config layer | .mcp.json / .claude/settings.json | Adversa AI TrustFall, May 2026 | Directory audit |
-| Remote docs layer | llms.txt / llms-full.txt naming unregistered or unverified packages/domains | Ars Technica, Aug 2026 | Remote audit (rule-based + external-state) |
+| Remote docs layer | llms.txt / llms-full.txt naming unregistered or unverified packages/domains | Ars Technica, Aug 2026 | Remote-audit engine (rule-based + external-state); `scan-remote` CLI in review (#4) |
 | MCP tool layer | Injection in a server's tool `description` fields | — | Planned, v0.4 PR4 |
 
 ---
@@ -288,19 +347,30 @@ different angles.
   - [x] PR1 — I8 in the invariant + substrate model; SSRF-hardened `remote_fetch`;
         format-agnostic `remote_audit` engine; `registry` existence + provenance
         model; `llms_txt` adapter; benign/suspicious/malicious fixtures (offline)
-  - [ ] PR2 — `scan-remote` CLI subcommand + report sections
-  - [ ] PR3 — judge pass over retrieved content (findings block as evidence)
+  - [ ] PR2 — `scan-remote` CLI subcommand + report sections *(in review: #4)*
+  - [ ] PR3 — two-pass judge over retrieved content, as untrusted evidence *(in review: #5, stacked on #4)*
   - [ ] PR4 — MCP tool-description adapter
 - [ ] v0.5 — Benchmark against ToxicSkills dataset (Snyk, February 2026)
 - [ ] v0.6 — False positive analysis, threshold calibration
 - [ ] v0.7 — Relational integrity monitor (conversational trajectory evaluation)
 - [ ] v1.0 — Publishable research findings
 
+The near-term priority after v0.4 lands is empirical, not conceptual:
+benchmarking against a labelled dataset, false-positive analysis, and
+threshold calibration. The framework is far enough along to deserve
+technical review; measured detection and false-positive rates are what
+would move it from a functioning framework toward a research result.
+
 ---
 
 ## License
 
-AGPL-3.0. See LICENSE.
+**AGPL-3.0-or-later.** Copyright (C) 2026 Rowan Lóchrann (Cherokee Schill)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. The full license text is in [LICENSE](LICENSE).
 
 ---
 
