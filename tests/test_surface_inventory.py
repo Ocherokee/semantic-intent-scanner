@@ -72,12 +72,26 @@ def _by_url(inventory: SurfaceInventory) -> dict[str, InventoryEntry]:
 
 def test_url_canonicalization_preserves_nondefault_port_and_query():
     assert canonicalize_url("HTTPS://EXAMPLE.COM:8443/a/../schema?x=1#frag") == (
-        "https://example.com:8443/a/../schema?x=1"
+        "https://example.com:8443/schema?x=1"
     )
 
 
 def test_default_443_is_same_canonical_origin():
     assert canonical_origin("https://EXAMPLE.com:443/path") == "https://example.com"
+
+
+def test_equivalent_host_and_path_forms_canonicalize_identically():
+    assert canonicalize_url("https://EXAMPLE.com./a/../schema.json#fragment") == (
+        "https://example.com/schema.json"
+    )
+    assert canonical_origin("https://example.com./") == canonical_origin("https://example.com")
+
+
+def test_userinfo_and_malformed_trailing_dot_hosts_are_rejected():
+    with pytest.raises(ValueError, match="userinfo"):
+        canonicalize_url("https://user@example.com/schema.json")
+    with pytest.raises(ValueError, match="trailing dots"):
+        canonicalize_url("https://example.com../schema.json")
 
 
 def test_non_https_target_is_rejected():
@@ -95,6 +109,18 @@ def test_fixed_seed_surface_types_and_provenance():
     assert entries["https://example.com/.well-known/ai-plugin.json"].surface_type == "ai_manifest"
     assert entries["https://example.com/robots.txt"].discovery == (DiscoveryRecord("well_known_path"),)
     assert entries["https://example.com/llms.txt"].discovery == (DiscoveryRecord("scanner_known_path"),)
+
+
+def test_no_common_paths_are_guessed_beyond_fixed_seeds():
+    fetcher = FakeFetcher({})
+    discover_inventory("https://example.com", fetcher=fetcher)
+    assert fetcher.calls == [
+        "https://example.com/robots.txt",
+        "https://example.com/llms.txt",
+        "https://example.com/llms-full.txt",
+        "https://example.com/.well-known/ai-plugin.json",
+    ]
+    assert not any("openapi" in url or url.endswith("/mcp") for url in fetcher.calls)
 
 
 def test_robots_declares_sitemap_with_distinct_provenance():
@@ -147,6 +173,19 @@ def test_manifest_declares_api_schema_and_preserves_factual_metadata():
     }
 
 
+@pytest.mark.parametrize("declared", ["/openapi.json#section", "//example.com/openapi.json"])
+def test_relative_and_scheme_relative_declarations_resolve_to_same_origin(declared):
+    manifest = "https://example.com/.well-known/ai-plugin.json"
+    schema = "https://example.com/openapi.json"
+    fetcher = FakeFetcher({
+        manifest: _outcome(manifest, body=json.dumps({"api": {"url": declared}}), content_type="application/json"),
+        schema: _outcome(schema, body="{}", content_type="application/json"),
+    })
+    inventory = discover_inventory("https://example.com", fetcher=fetcher)
+    assert _by_url(inventory)[schema].observation.status == "retrieved"
+    assert fetcher.calls.count(schema) == 1
+
+
 def test_schema_declares_endpoint_without_fetching_it():
     manifest = "https://example.com/.well-known/ai-plugin.json"
     schema = "https://example.com/openapi.json"
@@ -196,6 +235,21 @@ def test_cross_origin_declared_schema_is_recorded_not_retrieved():
     assert schema not in fetcher.calls
 
 
+def test_scheme_relative_cross_origin_declaration_is_not_retrieved():
+    manifest = "https://example.com/.well-known/ai-plugin.json"
+    schema = "https://schemas.example.net/openapi.json"
+    fetcher = FakeFetcher({
+        manifest: _outcome(
+            manifest,
+            body=json.dumps({"api": {"url": "//schemas.example.net/openapi.json#fragment"}}),
+            content_type="application/json",
+        ),
+    })
+    inventory = discover_inventory("https://example.com", fetcher=fetcher)
+    assert _by_url(inventory)[schema].observation.status == "advertised"
+    assert schema not in fetcher.calls
+
+
 def test_explicit_port_change_is_cross_origin_and_not_retrieved():
     manifest = "https://example.com:8443/.well-known/ai-plugin.json"
     schema = "https://example.com:9443/openapi.json"
@@ -236,6 +290,26 @@ def test_redirect_metadata_and_content_type_are_preserved():
     assert entry.observation.cross_origin_redirect is True
     assert entry.observation.content_type == "text/markdown; charset=utf-8"
     assert entry.observation.truncated is True
+
+
+def test_cross_origin_redirect_does_not_authorize_declared_follow_up():
+    manifest = "https://example.com/.well-known/ai-plugin.json"
+    redirected = "https://cdn.example.net/plugin.json"
+    schema = "https://example.com/openapi.json"
+    fetcher = FakeFetcher({
+        manifest: _outcome(
+            manifest,
+            final_url=redirected,
+            body=json.dumps({"api": {"url": schema}}),
+            content_type="application/json",
+            chain=[{"url": manifest, "status": 302}, {"url": redirected, "status": 200}],
+        ),
+    })
+    inventory = discover_inventory("https://example.com", fetcher=fetcher)
+    entry = _by_url(inventory)[schema]
+    assert entry.observation.status == "advertised"
+    assert entry.discovery == (DiscoveryRecord("manifest_declaration", redirected),)
+    assert schema not in fetcher.calls
 
 
 @pytest.mark.parametrize("status,blocked,error,expected", [
@@ -299,6 +373,23 @@ def test_duplicate_declarations_fetch_resource_once():
     assert fetcher.calls.count(sitemap) == 1
 
 
+def test_trailing_dot_and_dot_segment_aliases_do_not_expand_work():
+    robots = "https://example.com/robots.txt"
+    sitemap = "https://example.com/sitemap.xml"
+    fetcher = FakeFetcher({
+        robots: _outcome(
+            robots,
+            body="\n".join([
+                "Sitemap: https://example.com./a/../sitemap.xml#one",
+                "Sitemap: https://EXAMPLE.com/sitemap.xml#two",
+            ]),
+        ),
+    })
+    inventory = discover_inventory("https://example.com", fetcher=fetcher)
+    assert [entry.resource_url for entry in inventory.entries].count(sitemap) == 1
+    assert fetcher.calls.count(sitemap) == 1
+
+
 def test_cycle_terminates_and_fetches_each_resource_once():
     robots = "https://example.com/robots.txt"
     sitemap = "https://example.com/sitemap.xml"
@@ -346,6 +437,54 @@ def test_serialization_order_is_deterministic():
     assert serialize_inventory(inventory) == serialize_inventory(inventory)
     urls = [entry["resource_url"] for entry in json.loads(serialize_inventory(inventory))["entries"]]
     assert urls == sorted(urls)
+
+
+def test_equivalent_declaration_orders_serialize_identically():
+    robots = "https://example.com/robots.txt"
+    first = "https://example.com/sitemap-a.xml"
+    second = "https://example.com/sitemap-b.xml"
+    responses = {
+        first: _outcome(first, body="<urlset/>", content_type="application/xml"),
+        second: _outcome(second, body="<urlset/>", content_type="application/xml"),
+    }
+    forward = FakeFetcher({
+        **responses,
+        robots: _outcome(robots, body=f"Sitemap: {first}\nSitemap: {second}"),
+    })
+    reverse = FakeFetcher({
+        **responses,
+        robots: _outcome(robots, body=f"Sitemap: {second}\nSitemap: {first}"),
+    })
+    assert serialize_inventory(discover_inventory("https://example.com", fetcher=forward)) == (
+        serialize_inventory(discover_inventory("https://example.com", fetcher=reverse))
+    )
+
+
+def test_fetch_and_serialized_mutations_do_not_alias_inventory():
+    manifest = "https://example.com/.well-known/ai-plugin.json"
+    endpoint = "https://example.com/mcp"
+    outcome = _outcome(
+        manifest,
+        body=json.dumps({"name_for_model": "agent", "endpoint": endpoint}),
+        content_type="application/json",
+    )
+    inventory = discover_inventory("https://example.com", fetcher=FakeFetcher({manifest: outcome}))
+    manifest_entry = _by_url(inventory)[manifest]
+    endpoint_entry = _by_url(inventory)[endpoint]
+
+    outcome.redirect_chain[0]["url"] = "https://mutated.example/"
+    assert manifest_entry.observation.redirect_chain[0]["url"] == manifest
+
+    payload = inventory_as_dict(inventory)
+    serialized_manifest = next(entry for entry in payload["entries"] if entry["resource_url"] == manifest)
+    serialized_endpoint = next(entry for entry in payload["entries"] if entry["resource_url"] == endpoint)
+    serialized_manifest["metadata"]["name_for_model"] = "mutated"
+    serialized_endpoint["relationships"][0]["resource_url"] = "https://mutated.example/"
+    serialized_manifest["observation"]["redirect_chain"][0]["url"] = "https://mutated.example/"
+
+    assert manifest_entry.metadata == {"name_for_model": "agent"}
+    assert endpoint_entry.relationships[0].resource_url == manifest
+    assert manifest_entry.observation.redirect_chain[0]["url"] == manifest
 
 
 def test_empty_inventory_is_valid_and_deterministic():

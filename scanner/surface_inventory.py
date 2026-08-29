@@ -6,6 +6,8 @@ detectors, assign risk, produce findings, or interpret retrieved instructions.
 
 from __future__ import annotations
 
+import copy
+import ipaddress
 import json
 import math
 import re
@@ -112,6 +114,39 @@ class _EntryBuilder:
     metadata: dict[str, Any]
 
 
+def _remove_dot_segments(path: str) -> str:
+    """Apply RFC 3986 dot-segment removal without collapsing empty segments."""
+    source = path
+    output = ""
+    while source:
+        if source.startswith("../"):
+            source = source[3:]
+        elif source.startswith("./"):
+            source = source[2:]
+        elif source.startswith("/./"):
+            source = source[2:]
+        elif source == "/.":
+            source = "/"
+        elif source.startswith("/../"):
+            source = source[3:]
+            output = output.rsplit("/", 1)[0]
+        elif source == "/..":
+            source = "/"
+            output = output.rsplit("/", 1)[0]
+        elif source in {".", ".."}:
+            source = ""
+        else:
+            start = 1 if source.startswith("/") else 0
+            slash = source.find("/", start)
+            if slash < 0:
+                output += source
+                source = ""
+            else:
+                output += source[:slash]
+                source = source[slash:]
+    return output or "/"
+
+
 def canonicalize_url(url: str) -> str:
     """Canonicalize a public HTTPS resource without changing its query."""
     if not isinstance(url, str) or not url.strip():
@@ -126,8 +161,23 @@ def canonicalize_url(url: str) -> str:
     if not parsed.hostname or parsed.username is not None or parsed.password is not None:
         raise InventoryError("resource URL requires a hostname and must not contain userinfo")
     host = parsed.hostname.lower()
-    netloc = host if port in (None, 443) else f"{host}:{port}"
-    path = parsed.path or "/"
+    if host.endswith(".."):
+        raise InventoryError("resource URL hostname has multiple trailing dots")
+    host = host.removesuffix(".")
+    if not host:
+        raise InventoryError("resource URL requires a hostname")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError as exc:
+            raise InventoryError("resource URL hostname is not valid IDNA") from exc
+        canonical_host = host
+    else:
+        canonical_host = f"[{address.compressed}]" if address.version == 6 else address.compressed
+    netloc = canonical_host if port in (None, 443) else f"{canonical_host}:{port}"
+    path = _remove_dot_segments(parsed.path or "/")
     return urlunsplit(("https", netloc, path, parsed.query, ""))
 
 
@@ -184,7 +234,7 @@ def _observation_from_fetch(outcome: FetchOutcome) -> SurfaceObservation:
         content_type=outcome.content_type,
         fetched_at=outcome.fetched_at,
         sha256=outcome.sha256,
-        redirect_chain=tuple(outcome.redirect_chain),
+        redirect_chain=tuple(dict(hop) for hop in outcome.redirect_chain),
         cross_origin_redirect=outcome.cross_origin_redirect,
         truncated=outcome.truncated,
         error=outcome.error,
@@ -323,7 +373,7 @@ def _entry_as_dict(entry: InventoryEntry) -> dict[str, Any]:
             {"relationship": item.relationship, "resource_url": item.resource_url}
             for item in entry.relationships
         ],
-        "metadata": entry.metadata or {},
+        "metadata": copy.deepcopy(entry.metadata or {}),
     }
     return out
 
@@ -540,6 +590,7 @@ def discover_inventory(
         *,
         depth: int,
         metadata: Mapping[str, Any] | None = None,
+        fetch_authorized: bool = True,
     ) -> _EntryBuilder | None:
         nonlocal inventory_truncated
         try:
@@ -567,6 +618,7 @@ def discover_inventory(
         should_fetch = (
             surface_type != "advertised_endpoint"
             and depth <= MAX_DISCOVERY_DEPTH
+            and fetch_authorized
             and _same_origin(resource_url, target_origin)
         )
         observation = SurfaceObservation(status="failed" if should_fetch else "advertised")
@@ -632,6 +684,7 @@ def discover_inventory(
                 DiscoveryRecord(provenance_kind, source_url),
                 depth=builder.depth + 1,
                 metadata=child_metadata,
+                fetch_authorized=_same_origin(source_url, target_origin),
             )
 
     entries: list[InventoryEntry] = []
@@ -643,7 +696,7 @@ def discover_inventory(
             discovery=tuple(sorted(builder.discovery.values(), key=_discovery_key)),
             observation=builder.observation,
             relationships=tuple(sorted(builder.relationships.values(), key=_relationship_key)),
-            metadata=builder.metadata,
+            metadata=copy.deepcopy(builder.metadata),
         ))
     inventory = SurfaceInventory(target_origin, tuple(entries), inventory_truncated)
     validate_inventory(inventory)
