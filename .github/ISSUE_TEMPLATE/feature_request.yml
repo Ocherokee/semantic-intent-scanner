@@ -7,6 +7,8 @@ body:
       value: |
         Describe the problem before the implementation. Larger architecture changes belong in the design-proposal form.
 
+        **Do not disclose exploitable scanner vulnerabilities here.** Use the private security-reporting path described in the repository [security policy](https://github.com/Ocherokee/semantic-intent-scanner/security/policy).
+
   - type: textarea
     id: feature_problem
     attributes:

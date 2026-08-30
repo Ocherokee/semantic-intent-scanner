@@ -7,6 +7,8 @@ body:
       value: |
         Use this form for research and security architecture changes. Keep ordinary bug fixes and bounded features in their respective forms.
 
+        **Do not disclose exploitable scanner vulnerabilities here.** Use the private security-reporting path described in the repository [security policy](https://github.com/Ocherokee/semantic-intent-scanner/security/policy).
+
   - type: dropdown
     id: design_kind
     attributes:
