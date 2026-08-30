@@ -48,8 +48,34 @@ from .report import (
     render_remote_report,
     render_terminal_report,
 )
+from .resource_limits import MAX_LOCAL_ARTIFACT_BYTES
 from .surface_inventory import InventoryError, discover_inventory, serialize_inventory
 from .trust_analysis import analyze_trust_boundaries, serialize_trust_findings
+
+MAX_PUBLIC_ERROR_LENGTH = 240
+
+def _read_bounded_text(path: Path) -> str:
+    if path.stat().st_size > MAX_LOCAL_ARTIFACT_BYTES:
+        raise ValueError(f"input exceeds {MAX_LOCAL_ARTIFACT_BYTES} byte limit")
+    return path.read_text(encoding="utf-8")
+
+
+def _public_error(exc: BaseException) -> str:
+    if isinstance(exc, OSError):
+        reason = "input cannot be read"
+    elif isinstance(exc, UnicodeError):
+        reason = "input is not valid UTF-8 text"
+    elif isinstance(exc, json.JSONDecodeError):
+        reason = f"input is not valid JSON at line {exc.lineno}, column {exc.colno}"
+    else:
+        reason = " ".join(str(exc).split())
+    if len(reason) > MAX_PUBLIC_ERROR_LENGTH:
+        reason = reason[: MAX_PUBLIC_ERROR_LENGTH - 3] + "..."
+    return reason
+
+
+def _print_public_error(exc: BaseException) -> None:
+    print(f"Error: {_public_error(exc)}", file=sys.stderr)
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -70,7 +96,11 @@ def cmd_scan_file(path: Path, args: argparse.Namespace) -> int:
         print(f"Error: not a file: {path}", file=sys.stderr)
         return 1
 
-    skill_text = path.read_text(encoding="utf-8")
+    try:
+        skill_text = _read_bounded_text(path)
+    except (OSError, UnicodeError, ValueError) as exc:
+        _print_public_error(exc)
+        return 1
 
     if not skill_text.strip():
         print(f"Error: file is empty: {path}", file=sys.stderr)
@@ -113,7 +143,11 @@ def cmd_scan_directory(path: Path, args: argparse.Namespace) -> int:
 
     if skill_md and skill_md.exists():
         print(f"Found {skill_md.name} — running semantic evaluation...", file=sys.stderr)
-        skill_text = skill_md.read_text(encoding="utf-8")
+        try:
+            skill_text = _read_bounded_text(skill_md)
+        except (OSError, UnicodeError, ValueError) as exc:
+            _print_public_error(exc)
+            return 1
         if skill_text.strip():
             semantic_results = evaluate_skill(skill_text, api_key=args.api_key)
 
@@ -231,7 +265,7 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     try:
         inventory = discover_inventory(args.url)
     except InventoryError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_public_error(exc)
         return 3
     print(serialize_inventory(inventory))
     return 0
@@ -247,16 +281,16 @@ def cmd_inventory_diff(args: argparse.Namespace) -> int:
     current_path = Path(args.current)
     try:
         previous = json.loads(
-            previous_path.read_text(encoding="utf-8"),
+            _read_bounded_text(previous_path),
             parse_constant=_reject_nonfinite_json,
         )
         current = json.loads(
-            current_path.read_text(encoding="utf-8"),
+            _read_bounded_text(current_path),
             parse_constant=_reject_nonfinite_json,
         )
         change_set = compare_inventories(previous, current)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_public_error(exc)
         return 3
     print(serialize_change_set(change_set))
     return 0
@@ -267,12 +301,12 @@ def cmd_trust_analyze(args: argparse.Namespace) -> int:
     inventory_path = Path(args.inventory)
     try:
         inventory = json.loads(
-            inventory_path.read_text(encoding="utf-8"),
+            _read_bounded_text(inventory_path),
             parse_constant=_reject_nonfinite_json,
         )
         findings = analyze_trust_boundaries(inventory)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_public_error(exc)
         return 3
     print(serialize_trust_findings(findings))
     return 0

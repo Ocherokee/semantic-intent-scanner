@@ -92,6 +92,12 @@ def _edge_for_declaration(
         raise TrustAnalysisError(
             f"malformed endpoint_kind for authority target {target['resource_url']}"
         )
+    if "source_field" in metadata and (
+        not isinstance(metadata["source_field"], str) or not metadata["source_field"].strip()
+    ):
+        raise TrustAnalysisError(
+            f"malformed source_field for authority target {target['resource_url']}"
+        )
     if target_type == "advertised_endpoint" and endpoint_kind in SUPPORTED_ENDPOINT_KINDS:
         expected_provenance = (
             "schema_declaration" if endpoint_kind == "openapi_server" else "manifest_declaration"
@@ -106,7 +112,7 @@ def _edge_for_declaration(
     relationship_type: str
     if target_type == "api_schema" and provenance_kind == "manifest_declaration":
         expected_source_type = "ai_manifest"
-        source_field = "api.url"
+        source_field = metadata.get("source_field", "api.url")
         relationship_type = "action_schema_delegation"
     elif (
         target_type == "advertised_endpoint"
@@ -114,7 +120,7 @@ def _edge_for_declaration(
         and endpoint_kind in {"mcp_endpoint", "agent_endpoint"}
     ):
         expected_source_type = "ai_manifest"
-        source_field = endpoint_kind
+        source_field = metadata.get("source_field", endpoint_kind)
         relationship_type = "capability_delegation"
     elif (
         target_type == "advertised_endpoint"
@@ -122,7 +128,7 @@ def _edge_for_declaration(
         and endpoint_kind == "openapi_server"
     ):
         expected_source_type = "api_schema"
-        source_field = "servers[].url"
+        source_field = metadata.get("source_field", "servers[].url")
         relationship_type = "capability_delegation"
     else:
         return None

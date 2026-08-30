@@ -1,0 +1,1 @@
+{"schema_version":"0.1","finding_type":"example","severity":"low","observation":{"summary":"Observed state","evidence":[]},"rationale":"Existing rationale","remediation":{"summary":"Correct it","references":[]},"retest":{"condition":"observable state no longer exists"}}

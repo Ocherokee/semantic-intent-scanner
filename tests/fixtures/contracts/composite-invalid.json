@@ -1,0 +1,1 @@
+{"schema_version":"0.1","requested_analyzers":["directory"],"executions":[{"analyzer_id":"directory","status":"success","finding_count":-1,"semantic_coverage":"not_requested"}],"findings":[]}
