@@ -38,6 +38,7 @@ from scanner.finding_contract import (
     adapt_remote_finding,
     adapt_semantic_violation,
     finding_contract_as_dict,
+    serialize_finding_contract,
 )
 from scanner.llms_txt import audit_llms_txt
 from scanner.mcp_adapter import audit_mcp_tools
@@ -70,6 +71,12 @@ def _canonical(**overrides) -> FindingContract:
 
 def _success(analyzer_id: str, *findings: FindingContract) -> AnalyzerAdapter:
     return AnalyzerAdapter(analyzer_id, lambda: AdapterOutcome("success", tuple(findings)))
+
+
+def _serialized_mapping(value: dict) -> str:
+    return json.dumps(
+        value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False,
+    )
 
 
 def _served_fetch(body: bytes):
@@ -127,7 +134,8 @@ def test_remote_adapter_matches_established_canonical_path():
         "https://docs.example", registry=RegistryClient.from_fixture(REGISTRY_FIXTURE),
         fetch=_served_fetch(body),
     )
-    expected = [finding_contract_as_dict(adapt_remote_finding(item)) for item in direct["findings"]]
+    expected_models = [adapt_remote_finding(item) for item in direct["findings"]]
+    expected = [finding_contract_as_dict(item) for item in expected_models]
     composite = run_composite([remote_adapter(
         "remote", "https://docs.example",
         registry=RegistryClient.from_fixture(REGISTRY_FIXTURE), fetch=_served_fetch(body),
@@ -140,13 +148,17 @@ def test_remote_adapter_matches_established_canonical_path():
             json.dumps(item, sort_keys=True, separators=(",", ":")),
         ),
     )
+    assert sorted(serialize_finding_contract(item) for item in expected_models) == sorted(
+        _serialized_mapping(item.finding) for item in composite.findings
+    )
 
 
 def test_mcp_adapter_matches_established_canonical_path():
     source = FIX / "mcp" / "malicious" / "exfil.json"
     direct = audit_mcp_tools(str(source), registry=RegistryClient.from_fixture(REGISTRY_FIXTURE))
+    expected_models = [adapt_remote_finding(item) for item in direct["findings"]]
     expected = sorted(
-        (finding_contract_as_dict(adapt_remote_finding(item)) for item in direct["findings"]),
+        (finding_contract_as_dict(item) for item in expected_models),
         key=lambda item: (
             item["finding_type"], item.get("resource") or "",
             item.get("invariant_id") or "",
@@ -157,6 +169,9 @@ def test_mcp_adapter_matches_established_canonical_path():
         "mcp", str(source), registry=RegistryClient.from_fixture(REGISTRY_FIXTURE),
     )])
     assert [item.finding for item in composite.findings] == expected
+    assert sorted(serialize_finding_contract(item) for item in expected_models) == sorted(
+        _serialized_mapping(item.finding) for item in composite.findings
+    )
 
 
 def test_directory_adapter_matches_established_canonical_path(tmp_path):
@@ -164,12 +179,16 @@ def test_directory_adapter_matches_established_canonical_path(tmp_path):
     source.mkdir()
     (source / "agent.test.ts").write_text("fetch(token)", encoding="utf-8")
     direct = audit_directory(source)
-    expected = [
-        finding_contract_as_dict(adapt_directory_finding(item))
+    expected_models = [
+        adapt_directory_finding(item)
         for item in direct["suspicious_files"] + direct["config_findings"]
     ]
+    expected = [finding_contract_as_dict(item) for item in expected_models]
     composite = run_composite([directory_adapter("directory", source)])
     assert [item.finding for item in composite.findings] == expected
+    assert [serialize_finding_contract(item) for item in expected_models] == [
+        _serialized_mapping(item.finding) for item in composite.findings
+    ]
 
 
 def test_semantic_adapter_matches_established_explicit_severity_path(tmp_path):
@@ -183,13 +202,17 @@ def test_semantic_adapter_matches_established_explicit_severity_path(tmp_path):
     def evaluator(_text, *, api_key=None):
         return {"overall_risk": "high", "violations": [copy.deepcopy(violation)]}
 
-    expected = finding_contract_as_dict(adapt_semantic_violation(
+    expected_model = adapt_semantic_violation(
         violation, severity="high", resource=str(source),
-    ))
+    )
+    expected = finding_contract_as_dict(expected_model)
     composite = run_composite([semantic_adapter(
         "semantic", source, evaluator=evaluator,
     )])
     assert composite.findings[0].finding == expected
+    assert _serialized_mapping(composite.findings[0].finding) == serialize_finding_contract(
+        expected_model
+    )
     assert composite.executions[0].semantic_coverage == "complete"
 
 
@@ -197,9 +220,13 @@ def test_trust_adapter_matches_v08_canonical_finding(tmp_path):
     inventory = _trust_inventory()
     source = tmp_path / "inventory.json"
     source.write_text(json.dumps(inventory), encoding="utf-8")
-    expected = finding_contract_as_dict(analyze_trust_boundaries(inventory)[0])
+    expected_model = analyze_trust_boundaries(inventory)[0]
+    expected = finding_contract_as_dict(expected_model)
     composite = run_composite([trust_adapter("trust", source)])
     assert composite.findings[0].finding == expected
+    assert _serialized_mapping(composite.findings[0].finding) == serialize_finding_contract(
+        expected_model
+    )
 
 
 def test_composite_schema_is_independent():
@@ -267,7 +294,7 @@ def test_all_failures_remain_explicit():
     }
 
 
-def test_not_applicable_is_not_empty_success():
+def test_explicit_skip_is_not_empty_success():
     artifact = run_composite([
         AnalyzerAdapter("mcp", lambda: AdapterOutcome("skipped", reason="no tools")),
     ])
@@ -275,25 +302,90 @@ def test_not_applicable_is_not_empty_success():
     assert composite_exit_code(artifact) == 0
 
 
-def test_mcp_no_tools_is_explicitly_skipped(tmp_path):
+def test_mcp_no_tools_is_explicitly_not_applicable(tmp_path):
     source = tmp_path / "tools.json"
     source.write_text('{"tools": []}', encoding="utf-8")
     artifact = run_composite([mcp_adapter(
         "mcp", source, registry=RegistryClient.from_fixture(REGISTRY_FIXTURE),
     )])
-    assert artifact.executions[0].status == "skipped"
+    assert artifact.executions[0].status == "not_applicable"
     assert artifact.executions[0].reason
 
 
 def test_requested_but_incomplete_judge_coverage_is_preserved(monkeypatch):
+    deterministic = {
+        "invariant_id": "I8", "finding_type": "dangling_package",
+        "risk": "critical", "summary": "package is unclaimed",
+        "evidence": "acme-agent", "analysis_method": "fixture",
+        "observed_at": "2026-08-29T00:00:00Z", "provenance_state": "unclaimed",
+        "detail": {
+            "source_url": "https://example.com/llms.txt", "package": "acme-agent",
+        },
+    }
     monkeypatch.setattr(composite_module, "audit_llms_txt", lambda *_a, **_kw: {
         "surface": "llms_txt", "retrieved": 1, "documents": [{}],
-        "findings": [], "overall_risk": "low", "judge_status": "error:api",
+        "findings": [deterministic], "overall_risk": "critical",
+        "judge_status": "error:api",
         "semantic_coverage": "incomplete",
     })
     artifact = run_composite([remote_adapter("remote", "https://example.com", judge=object())])
     assert artifact.executions[0].status == "success"
     assert artifact.executions[0].semantic_coverage == "incomplete"
+    assert artifact.executions[0].finding_count == 1
+    assert artifact.findings[0].finding["severity"] == "critical"
+
+
+def test_partial_judge_coverage_is_not_flattened(monkeypatch):
+    monkeypatch.setattr(composite_module, "audit_llms_txt", lambda *_a, **_kw: {
+        "surface": "llms_txt", "retrieved": 1, "documents": [{}],
+        "findings": [], "overall_risk": "low", "judge_status": "partial",
+        "semantic_coverage": "partial",
+    })
+    artifact = run_composite([remote_adapter("remote", "https://example.com", judge=object())])
+    assert artifact.executions[0].status == "success"
+    assert artifact.executions[0].semantic_coverage == "partial"
+
+
+def test_invalid_remote_finding_preserves_coverage_in_failure(monkeypatch):
+    monkeypatch.setattr(composite_module, "audit_llms_txt", lambda *_a, **_kw: {
+        "surface": "llms_txt", "retrieved": 1, "documents": [{}],
+        "findings": [{}], "overall_risk": "low", "judge_status": "partial",
+        "semantic_coverage": "partial",
+    })
+    artifact = run_composite([remote_adapter("remote", "https://example.com", judge=object())])
+    assert artifact.executions[0].status == "failed_operational"
+    assert artifact.executions[0].semantic_coverage == "partial"
+    assert artifact.executions[0].reason == "analyzer returned an invalid canonical finding"
+
+
+def test_semantic_parse_failure_is_incomplete_not_full_coverage(tmp_path):
+    source = tmp_path / "SKILL.md"
+    source.write_text("content", encoding="utf-8")
+
+    def evaluator(_text, *, api_key=None):
+        return {
+            "overall_risk": "medium", "violations": [],
+            "chunks": [{"chunk_risk": "parse_error", "raw_response": "not JSON"}],
+        }
+
+    artifact = run_composite([semantic_adapter("semantic", source, evaluator=evaluator)])
+    assert artifact.executions[0].status == "success"
+    assert artifact.executions[0].finding_count == 0
+    assert artifact.executions[0].semantic_coverage == "incomplete"
+
+
+def test_semantic_model_failure_is_operational_and_incomplete(tmp_path):
+    source = tmp_path / "SKILL.md"
+    source.write_text("content", encoding="utf-8")
+
+    def evaluator(_text, *, api_key=None):
+        raise RuntimeError("secret API response")
+
+    artifact = run_composite([semantic_adapter("semantic", source, evaluator=evaluator)])
+    assert artifact.executions[0].status == "failed_operational"
+    assert artifact.executions[0].semantic_coverage == "incomplete"
+    assert artifact.executions[0].reason == "semantic model evaluation failed"
+    assert "secret" not in serialize_composite_audit(artifact)
 
 
 def test_remote_guard_failure_is_operational_not_low_risk(monkeypatch):
@@ -325,11 +417,23 @@ def test_artifact_only_adapters_do_not_invoke_remote_analyzer(tmp_path, monkeypa
 
 def test_adapter_exception_is_isolated_as_operational_failure():
     def explode():
-        raise RuntimeError("transport unavailable")
+        raise RuntimeError("secret-token=do-not-serialize; volatile path C:/temp/123")
 
     artifact = run_composite([AnalyzerAdapter("broken", explode)])
     assert artifact.executions[0].status == "failed_operational"
-    assert "RuntimeError" in artifact.executions[0].reason
+    assert artifact.executions[0].reason == "adapter raised RuntimeError"
+    assert "secret-token" not in serialize_composite_audit(artifact)
+
+
+def test_adapter_reason_is_whitespace_normalized_and_bounded():
+    artifact = run_composite([AnalyzerAdapter(
+        "broken",
+        lambda: AdapterOutcome("failed_operational", reason="  unavailable\n" + "x" * 500),
+    )])
+    reason = artifact.executions[0].reason
+    assert "\n" not in reason
+    assert len(reason) == composite_module.MAX_FAILURE_REASON_LENGTH
+    assert reason.endswith("...")
 
 
 def test_invalid_canonical_finding_fails_operationally():
@@ -391,6 +495,15 @@ def test_validation_rejects_impossible_state_and_count():
         validate_composite_audit(payload)
 
 
+def test_validation_rejects_unbounded_or_noncanonical_failure_reason():
+    payload = composite_audit_as_dict(run_composite([AnalyzerAdapter(
+        "broken", lambda: AdapterOutcome("failed_operational", reason="bounded"),
+    )]))
+    payload["executions"][0]["reason"] = " secret\n" + "x" * 500
+    with pytest.raises(CompositeValidationError, match="reason must be normalized"):
+        validate_composite_audit(payload)
+
+
 def test_validation_rejects_nondeterministic_order():
     artifact = run_composite([
         _success("a", _canonical()), _success("b", _canonical()),
@@ -412,6 +525,21 @@ def test_cli_audit_directory_emits_only_composite_json(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["requested_analyzers"] == ["directory"]
     assert payload["executions"][0]["status"] == "success"
+
+
+def test_repeated_cli_analyzer_requests_get_deterministic_distinct_ids(tmp_path, capsys):
+    source = tmp_path / "skill"
+    source.mkdir()
+    args = argparse.Namespace(
+        directory=[str(source), str(source)], skill=None, remote=None, mcp=None,
+        trust_inventory=None, judge=False, api_key=None, server_label=None,
+    )
+    assert cmd_audit(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requested_analyzers"] == ["directory", "directory:2"]
+    assert [item["analyzer_id"] for item in payload["executions"]] == [
+        "directory", "directory:2",
+    ]
 
 
 def test_cli_requires_explicit_input(capsys):

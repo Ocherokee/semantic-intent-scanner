@@ -27,9 +27,10 @@ from .trust_analysis import analyze_trust_boundaries
 COMPOSITE_SCHEMA_VERSION = "0.1"
 SUPPORTED_COMPOSITE_SCHEMA_VERSIONS = frozenset({COMPOSITE_SCHEMA_VERSION})
 ANALYZER_STATUSES = frozenset(
-    {"success", "skipped", "failed_invalid_input", "failed_operational"}
+    {"success", "not_applicable", "skipped", "failed_invalid_input", "failed_operational"}
 )
-SEMANTIC_COVERAGE = frozenset({"not_requested", "complete", "incomplete"})
+SEMANTIC_COVERAGE = frozenset({"not_requested", "complete", "partial", "incomplete"})
+MAX_FAILURE_REASON_LENGTH = 240
 
 
 class CompositeAuditError(ValueError):
@@ -84,20 +85,47 @@ def _failed(status: str, reason: str) -> AdapterOutcome:
 def _coverage(result: Mapping[str, Any], judge_requested: bool) -> str:
     if not judge_requested:
         return "not_requested"
-    return "complete" if result.get("semantic_coverage") == "complete" else "incomplete"
+    coverage = result.get("semantic_coverage")
+    return coverage if coverage in {"complete", "partial", "incomplete"} else "incomplete"
+
+
+def _bounded_reason(value: str) -> str:
+    """Normalize adapter-owned public reasons without exposing unbounded detail."""
+    normalized = " ".join(value.split())
+    if len(normalized) <= MAX_FAILURE_REASON_LENGTH:
+        return normalized
+    return normalized[: MAX_FAILURE_REASON_LENGTH - 3] + "..."
 
 
 def _remote_outcome(result: Mapping[str, Any], *, judge_requested: bool) -> AdapterOutcome:
     status = remote_operational_status(dict(result))
     coverage = _coverage(result, judge_requested)
     if status == "ok":
-        findings = tuple(adapt_remote_finding(item) for item in result.get("findings", []))
+        try:
+            findings = tuple(adapt_remote_finding(item) for item in result.get("findings", []))
+        except Exception:
+            return AdapterOutcome(
+                "failed_operational",
+                reason="analyzer returned an invalid canonical finding",
+                semantic_coverage=coverage,
+            )
         return AdapterOutcome("success", findings, semantic_coverage=coverage)
-    reason = str(result.get("note") or status)
-    if status in {"not_found", "no_tools"}:
-        return AdapterOutcome("skipped", reason=reason, semantic_coverage=coverage)
+    if status == "not_found":
+        return AdapterOutcome(
+            "not_applicable", reason="no supported remote document was served",
+            semantic_coverage=coverage,
+        )
+    if status == "no_tools":
+        return AdapterOutcome(
+            "not_applicable", reason="the captured artifact contained no tool definitions",
+            semantic_coverage=coverage,
+        )
     if status == "invalid_input":
-        return _failed("failed_invalid_input", reason)
+        return _failed("failed_invalid_input", "input is invalid for the selected analyzer")
+    reason = {
+        "fetch_blocked": "guarded retrieval blocked every remote candidate",
+        "fetch_failed": "remote retrieval failed for every candidate",
+    }.get(status, "selected analyzer could not operate")
     return AdapterOutcome("failed_operational", reason=reason, semantic_coverage=coverage)
 
 
@@ -107,8 +135,15 @@ def remote_adapter(
 ) -> AnalyzerAdapter:
     """Wrap the established remote llms.txt analyzer without widening fetch authority."""
     def run() -> AdapterOutcome:
+        try:
+            result = audit_llms_txt(target, registry=registry, fetch=fetch, judge=judge)
+        except Exception:
+            return AdapterOutcome(
+                "failed_operational", reason="remote analyzer execution failed",
+                semantic_coverage="incomplete" if judge is not None else "not_requested",
+            )
         return _remote_outcome(
-            audit_llms_txt(target, registry=registry, fetch=fetch, judge=judge),
+            result,
             judge_requested=judge is not None,
         )
     return AnalyzerAdapter(analyzer_id, run)
@@ -120,10 +155,17 @@ def mcp_adapter(
 ) -> AnalyzerAdapter:
     """Wrap captured MCP analysis; this never starts a transport or invokes a tool."""
     def run() -> AdapterOutcome:
-        return _remote_outcome(
-            audit_mcp_tools(
+        try:
+            result = audit_mcp_tools(
                 source, registry=registry, judge=judge, server_label=server_label,
-            ),
+            )
+        except Exception:
+            return AdapterOutcome(
+                "failed_operational", reason="MCP analyzer execution failed",
+                semantic_coverage="incomplete" if judge is not None else "not_requested",
+            )
+        return _remote_outcome(
+            result,
             judge_requested=judge is not None,
         )
     return AnalyzerAdapter(analyzer_id, run)
@@ -136,7 +178,7 @@ def directory_adapter(analyzer_id: str, source: str | Path) -> AnalyzerAdapter:
     def run() -> AdapterOutcome:
         result = audit_directory(path)
         if "error" in result:
-            return _failed("failed_invalid_input", str(result["error"]))
+            return _failed("failed_invalid_input", "directory input is missing or not a directory")
         legacy = [
             *result.get("suspicious_files", []),
             *result.get("config_findings", []),
@@ -157,17 +199,35 @@ def semantic_adapter(
     def run() -> AdapterOutcome:
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            return _failed("failed_invalid_input", f"cannot read input: {exc}")
+        except (OSError, UnicodeError):
+            return _failed("failed_invalid_input", "skill input cannot be read as UTF-8 text")
         if not text.strip():
-            return _failed("failed_invalid_input", f"file is empty: {path}")
-        result = evaluator(text, api_key=api_key)
+            return _failed("failed_invalid_input", "skill input is empty")
+        try:
+            result = evaluator(text, api_key=api_key)
+        except Exception:
+            return AdapterOutcome(
+                "failed_operational", reason="semantic model evaluation failed",
+                semantic_coverage="incomplete",
+            )
         severity = result.get("overall_risk")
-        findings = tuple(
-            adapt_semantic_violation(item, severity=severity, resource=str(path))
-            for item in result.get("violations", [])
-        )
-        return AdapterOutcome("success", findings, semantic_coverage="complete")
+        chunks = result.get("chunks", [])
+        coverage = "incomplete" if any(
+            isinstance(chunk, Mapping) and chunk.get("chunk_risk") == "parse_error"
+            for chunk in chunks
+        ) else "complete"
+        try:
+            findings = tuple(
+                adapt_semantic_violation(item, severity=severity, resource=str(path))
+                for item in result.get("violations", [])
+            )
+        except Exception:
+            return AdapterOutcome(
+                "failed_operational",
+                reason="semantic analyzer returned an invalid canonical finding",
+                semantic_coverage=coverage,
+            )
+        return AdapterOutcome("success", findings, semantic_coverage=coverage)
     return AnalyzerAdapter(analyzer_id, run)
 
 
@@ -186,8 +246,12 @@ def trust_adapter(analyzer_id: str, source: str | Path) -> AnalyzerAdapter:
         try:
             inventory = _load_json(path)
             findings = analyze_trust_boundaries(inventory)
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-            return _failed("failed_invalid_input", str(exc))
+        except (OSError, UnicodeError):
+            return _failed("failed_invalid_input", "trust inventory input cannot be read")
+        except json.JSONDecodeError:
+            return _failed("failed_invalid_input", "trust inventory is not valid JSON")
+        except ValueError:
+            return _failed("failed_invalid_input", "trust inventory is malformed or unsupported")
         return AdapterOutcome("success", tuple(findings))
     return AnalyzerAdapter(analyzer_id, run)
 
@@ -232,9 +296,12 @@ def run_composite(adapters: Sequence[AnalyzerAdapter]) -> CompositeAudit:
                 validate_finding_contract(finding)
                 snapshots.append(copy.deepcopy(finding_contract_as_dict(finding)))
         except Exception as exc:  # adapter isolation is part of the public contract
+            failure_identity = type(exc).__name__
+            if not failure_identity.isidentifier() or len(failure_identity) > 80:
+                failure_identity = "Exception"
             outcome = AdapterOutcome(
                 "failed_operational",
-                reason=f"{type(exc).__name__}: {exc}",
+                reason=f"adapter raised {failure_identity}",
             )
             snapshots = []
         executions.append(AnalyzerExecution(
@@ -242,7 +309,7 @@ def run_composite(adapters: Sequence[AnalyzerAdapter]) -> CompositeAudit:
             status=outcome.status,
             finding_count=len(snapshots),
             semantic_coverage=outcome.semantic_coverage,
-            reason=outcome.reason,
+            reason=_bounded_reason(outcome.reason) if outcome.reason is not None else None,
         ))
         sourced.extend(SourcedFinding(adapter.analyzer_id, item) for item in snapshots)
 
@@ -382,6 +449,11 @@ def validate_composite_audit(value: CompositeAudit | Mapping[str, Any]) -> None:
             not isinstance(execution.get("reason"), str) or not execution["reason"].strip()
         ):
             raise CompositeValidationError(f"{path} non-success requires reason")
+        if "reason" in execution and execution["reason"] != _bounded_reason(execution["reason"]):
+            raise CompositeValidationError(
+                f"{path}.reason must be normalized and at most "
+                f"{MAX_FAILURE_REASON_LENGTH} characters"
+            )
         counts[analyzer_id] = count
     if execution_ids != requested:
         raise CompositeValidationError("executions must match requested analyzer order")
