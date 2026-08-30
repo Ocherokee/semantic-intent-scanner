@@ -25,6 +25,7 @@ MAX_INVENTORY_ENTRIES = 32
 MAX_DISCOVERY_DEPTH = 2
 MAX_DECLARATIONS_PER_RESOURCE = 16
 MAX_METADATA_STRING = 512
+MAX_STRUCTURED_DOCUMENT_BYTES = 512 * 1024
 
 SURFACE_TYPES = frozenset({
     "robots", "llms", "sitemap", "ai_manifest", "api_schema",
@@ -173,6 +174,14 @@ def canonicalize_url(url: str) -> str:
             host = host.encode("idna").decode("ascii").lower()
         except UnicodeError as exc:
             raise InventoryError("resource URL hostname is not valid IDNA") from exc
+        labels = host.split(".")
+        if any(
+            not label or len(label) > 63
+            or label.startswith("-") or label.endswith("-")
+            or re.fullmatch(r"[a-z0-9-]+", label) is None
+            for label in labels
+        ) or len(host) > 253:
+            raise InventoryError("resource URL hostname is malformed")
         canonical_host = host
     else:
         canonical_host = f"[{address.compressed}]" if address.version == 6 else address.compressed
@@ -279,6 +288,11 @@ def _parse_sitemap(text: str, source_url: str) -> tuple[list[tuple[str, str, dic
 
 
 def _load_json(text: str) -> tuple[Any | None, dict[str, Any]]:
+    if len(text.encode("utf-8")) > MAX_STRUCTURED_DOCUMENT_BYTES:
+        return None, {
+            "parse_error": "structured document exceeds byte limit",
+            "resource_limit": MAX_STRUCTURED_DOCUMENT_BYTES,
+        }
     try:
         return json.loads(text), {}
     except (json.JSONDecodeError, UnicodeError) as exc:
@@ -297,18 +311,22 @@ def _parse_manifest(text: str, source_url: str) -> tuple[list[tuple[str, str, di
             metadata[key] = value
     found: list[tuple[str, str, dict[str, Any]]] = []
     api = payload.get("api")
-    if isinstance(api, dict) and isinstance(api.get("url"), str):
-        try:
-            found.append(("api_schema", canonicalize_url(urljoin(source_url, api["url"])), {}))
-        except InventoryError:
-            pass
+    if "api" in payload:
+        if not isinstance(api, dict) or not isinstance(api.get("url"), str):
+            metadata["declaration_error"] = "api.url must be a string"
+        else:
+            try:
+                found.append(("api_schema", canonicalize_url(urljoin(source_url, api["url"])), {}))
+            except InventoryError as exc:
+                metadata["declaration_error"] = f"api.url is invalid: {_bounded_text(str(exc))}"
     for key in ("mcp_endpoint", "agent_endpoint", "endpoint", "url"):
         value = payload.get(key)
         if not isinstance(value, str):
             continue
         try:
             url = canonicalize_url(urljoin(source_url, value))
-        except InventoryError:
+        except InventoryError as exc:
+            metadata[f"{key}_declaration_error"] = _bounded_text(str(exc))
             continue
         found.append(("advertised_endpoint", url, {"endpoint_kind": key}))
     return found[:MAX_DECLARATIONS_PER_RESOURCE], metadata
@@ -329,14 +347,21 @@ def _parse_api_schema(text: str, source_url: str) -> tuple[list[tuple[str, str, 
     found: list[tuple[str, str, dict[str, Any]]] = []
     servers = payload.get("servers")
     if isinstance(servers, list):
-        for server in servers[:MAX_DECLARATIONS_PER_RESOURCE]:
+        for index, server in enumerate(servers[:MAX_DECLARATIONS_PER_RESOURCE]):
+            source_field = f"servers[{index}].url"
             if not isinstance(server, dict) or not isinstance(server.get("url"), str):
+                metadata[f"declaration_error_{index}"] = f"{source_field} must be a string"
                 continue
             try:
                 url = canonicalize_url(urljoin(source_url, server["url"]))
-            except InventoryError:
+            except InventoryError as exc:
+                metadata[f"declaration_error_{index}"] = f"{source_field} is invalid: {_bounded_text(str(exc))}"
                 continue
-            found.append(("advertised_endpoint", url, {"endpoint_kind": "openapi_server"}))
+            found.append(("advertised_endpoint", url, {
+                "endpoint_kind": "openapi_server", "source_field": source_field,
+            }))
+    elif "servers" in payload:
+        metadata["declaration_error"] = "servers must be an array"
     return found, metadata
 
 

@@ -22,6 +22,7 @@ from .finding_contract import (
 from .llms_txt import audit_llms_txt
 from .mcp_adapter import audit_mcp_tools
 from .report import remote_operational_status
+from .resource_limits import MAX_LOCAL_ARTIFACT_BYTES
 from .trust_analysis import analyze_trust_boundaries
 
 COMPOSITE_SCHEMA_VERSION = "0.1"
@@ -198,6 +199,14 @@ def semantic_adapter(
 
     def run() -> AdapterOutcome:
         try:
+            if path.stat().st_size > MAX_LOCAL_ARTIFACT_BYTES:
+                return _failed(
+                    "failed_invalid_input",
+                    f"skill input exceeds {MAX_LOCAL_ARTIFACT_BYTES} byte limit",
+                )
+        except OSError:
+            return _failed("failed_invalid_input", "skill input cannot be read")
+        try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             return _failed("failed_invalid_input", "skill input cannot be read as UTF-8 text")
@@ -235,6 +244,8 @@ def _load_json(path: Path) -> Any:
     def reject(value: str) -> None:
         raise ValueError(f"non-finite JSON number is not allowed: {value}")
 
+    if path.stat().st_size > MAX_LOCAL_ARTIFACT_BYTES:
+        raise ValueError(f"local artifact exceeds {MAX_LOCAL_ARTIFACT_BYTES} byte limit")
     return json.loads(path.read_text(encoding="utf-8"), parse_constant=reject)
 
 

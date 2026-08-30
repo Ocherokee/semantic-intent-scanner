@@ -63,6 +63,9 @@ Judge = Callable[[RemoteDocument, "list[Finding]"], Any]
 # distinguishable, and the synthetic ``mcp://`` URI is built from the lossless
 # path for exactly that reason.
 _PATH_TRANSPARENT = {"properties", "patternProperties", "$defs", "definitions"}
+MAX_MCP_INPUT_BYTES = 512 * 1024
+MAX_MCP_NESTING_DEPTH = 64
+MAX_MCP_DESCRIPTION_FIELDS = 4096
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +133,7 @@ def _server_label(payload: Any, override: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _walk_descriptions(node: Any, friendly: list[str], jsonpath: str,
-                       out: list[tuple[str, str, str]]) -> None:
+                       out: list[tuple[str, str, str]], depth: int = 0) -> None:
     """
     Collect every string-valued ``description`` anywhere under ``node``.
 
@@ -150,10 +153,18 @@ def _walk_descriptions(node: Any, friendly: list[str], jsonpath: str,
         ``inputSchema.$defs.foo.description``,
         ``inputSchema.oneOf[0].properties.foo.description``
     """
+    if depth > MAX_MCP_NESTING_DEPTH:
+        raise ValueError(f"MCP inputSchema exceeds nesting depth {MAX_MCP_NESTING_DEPTH}")
+    if len(out) >= MAX_MCP_DESCRIPTION_FIELDS:
+        raise ValueError(f"MCP inputSchema exceeds {MAX_MCP_DESCRIPTION_FIELDS} description fields")
     if isinstance(node, dict):
         for key, value in node.items():
             if key == "description":
                 if isinstance(value, str) and value.strip():
+                    if len(out) >= MAX_MCP_DESCRIPTION_FIELDS:
+                        raise ValueError(
+                            f"MCP inputSchema exceeds {MAX_MCP_DESCRIPTION_FIELDS} description fields"
+                        )
                     out.append((
                         ".".join(friendly + ["description"]),
                         jsonpath + ".description",
@@ -161,10 +172,10 @@ def _walk_descriptions(node: Any, friendly: list[str], jsonpath: str,
                     ))
                 continue
             f_child = friendly if key in _PATH_TRANSPARENT else friendly + [str(key)]
-            _walk_descriptions(value, f_child, f"{jsonpath}.{key}", out)
+            _walk_descriptions(value, f_child, f"{jsonpath}.{key}", out, depth + 1)
     elif isinstance(node, list):
         for i, item in enumerate(node):
-            _walk_descriptions(item, friendly + [str(i)], f"{jsonpath}[{i}]", out)
+            _walk_descriptions(item, friendly + [str(i)], f"{jsonpath}[{i}]", out, depth + 1)
 
 
 def _tool_fields(tool: dict) -> list[tuple[str, str, str]]:
@@ -258,6 +269,10 @@ def audit_mcp_tools(
         return _bail(result, parse_error=f"cannot read input: {exc}",
                      note=f"cannot read {source}: {exc}", judge=judge)
 
+    if len(raw.encode("utf-8")) > MAX_MCP_INPUT_BYTES:
+        return _bail(result, parse_error=f"input exceeds {MAX_MCP_INPUT_BYTES} byte limit",
+                     note="captured MCP input exceeds deterministic byte limit", judge=judge)
+
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -302,7 +317,19 @@ def audit_mcp_tools(
             })
             continue
 
-        fields = _tool_fields(tool)
+        try:
+            fields = _tool_fields(tool)
+        except ValueError as exc:
+            malformed += 1
+            doc_summaries.append({
+                "kind": "mcp_tool", "requested_url": _mcp_uri(label, name, "whole"),
+                "final_url": None, "status": 0, "content_type": "application/json",
+                "sha256": None, "fetched_at": read_at, "bytes": 0,
+                "redirect_chain": [], "cross_origin_redirect": False, "truncated": False,
+                "error": str(exc), "blocked_reason": None, "mcp_tool": name,
+                "mcp_fields": [], "mcp_json_paths": [],
+            })
+            continue
         combined = _combined_text(fields)
         combined_uri = _mcp_uri(label, name, "whole")
 

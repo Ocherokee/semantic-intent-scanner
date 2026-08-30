@@ -26,6 +26,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .resource_limits import MAX_AUDITED_FILE_BYTES
+
 
 # ---------------------------------------------------------------------------
 # File classification
@@ -200,6 +202,12 @@ def _audit_file(file_path: Path) -> dict[str, Any]:
     }
 
     try:
+        if file_path.stat().st_size > MAX_AUDITED_FILE_BYTES:
+            finding["reason"] += (
+                f" (Contents not analyzed: file exceeds {MAX_AUDITED_FILE_BYTES} byte limit.)"
+            )
+            finding["resource_limit_exceeded"] = True
+            return finding
         content = file_path.read_text(encoding="utf-8", errors="ignore")
         patterns_found = _scan_content(content)
         finding["dangerous_patterns"] = patterns_found
@@ -303,6 +311,12 @@ def _audit_config(config_path: Path, skill_path: Path) -> dict[str, Any] | None:
     }
 
     try:
+        if config_path.stat().st_size > MAX_AUDITED_FILE_BYTES:
+            finding["reason"] = (
+                f"Config contents not analyzed: file exceeds {MAX_AUDITED_FILE_BYTES} byte limit."
+            )
+            finding["resource_limit_exceeded"] = True
+            return finding
         content = config_path.read_text(encoding="utf-8", errors="ignore")
 
         # Check for dangerous MCP settings
