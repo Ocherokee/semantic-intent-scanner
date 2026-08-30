@@ -36,6 +36,12 @@ from .surface_inventory import (
     serialize_inventory,
     validate_inventory,
 )
+from .trust_analysis import (
+    AuthorityEdge,
+    analyze_trust_boundaries,
+    extract_authority_edges,
+    serialize_trust_findings,
+)
 
 __all__ = [
     "audit_directory",
@@ -69,4 +75,8 @@ __all__ = [
     "discover_inventory",
     "serialize_inventory",
     "validate_inventory",
+    "AuthorityEdge",
+    "analyze_trust_boundaries",
+    "extract_authority_edges",
+    "serialize_trust_findings",
 ]

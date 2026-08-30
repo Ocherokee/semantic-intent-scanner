@@ -14,6 +14,8 @@ Usage:
     semantic-intent inventory <url>            Inventory public agent-readable surfaces as JSON
     semantic-intent inventory-diff <previous.json> <current.json>
                                                 Compare two inventory artifacts offline
+    semantic-intent trust-analyze <inventory.json>
+                                                Analyze structural authority crossings offline
 """
 
 import argparse
@@ -35,6 +37,7 @@ from .report import (
     render_terminal_report,
 )
 from .surface_inventory import InventoryError, discover_inventory, serialize_inventory
+from .trust_analysis import analyze_trust_boundaries, serialize_trust_findings
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -247,6 +250,22 @@ def cmd_inventory_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_trust_analyze(args: argparse.Namespace) -> int:
+    """Analyze one local inventory without retrieval, execution, or judgment."""
+    inventory_path = Path(args.inventory)
+    try:
+        inventory = json.loads(
+            inventory_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_json,
+        )
+        findings = analyze_trust_boundaries(inventory)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 3
+    print(serialize_trust_findings(findings))
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="semantic-intent",
@@ -320,6 +339,12 @@ def main() -> None:
     diff_parser.add_argument("previous", help="Path to the previous inventory JSON artifact")
     diff_parser.add_argument("current", help="Path to the current inventory JSON artifact")
 
+    trust_parser = subparsers.add_parser(
+        "trust-analyze",
+        help="Analyze structural authority crossings in an inventory artifact (offline)",
+    )
+    trust_parser.add_argument("inventory", help="Path to an inventory JSON artifact")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -332,6 +357,8 @@ def main() -> None:
         sys.exit(cmd_inventory(args))
     if args.command == "inventory-diff":
         sys.exit(cmd_inventory_diff(args))
+    if args.command == "trust-analyze":
+        sys.exit(cmd_trust_analyze(args))
 
 
 if __name__ == "__main__":
