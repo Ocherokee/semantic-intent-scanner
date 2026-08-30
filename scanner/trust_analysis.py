@@ -33,9 +33,11 @@ class TrustAnalysisError(ValueError):
 class AuthorityEdge:
     source_surface_type: str
     source_url: str
+    declaring_origin: str
     source_field: str
     target_surface_type: str
     target_url: str
+    target_origin: str
     relationship_type: str
     provenance_kind: str
     boundary: str
@@ -138,17 +140,17 @@ def _edge_for_declaration(
         )
     if source["observation"]["status"] != "retrieved":
         raise TrustAnalysisError(f"authority declaration source was not retrieved: {source_url}")
-    boundary = (
-        "same_origin"
-        if canonical_origin(source_url) == canonical_origin(target["resource_url"])
-        else "cross_origin"
-    )
+    declaring_origin = canonical_origin(source_url)
+    target_origin = canonical_origin(target["resource_url"])
+    boundary = "same_origin" if declaring_origin == target_origin else "cross_origin"
     return AuthorityEdge(
         source_surface_type=source["surface_type"],
         source_url=source_url,
+        declaring_origin=declaring_origin,
         source_field=source_field,
         target_surface_type=target_type,
         target_url=target["resource_url"],
+        target_origin=target_origin,
         relationship_type=relationship_type,
         provenance_kind=provenance_kind,
         boundary=boundary,
@@ -197,8 +199,10 @@ def _finding_for_edge(edge: AuthorityEdge) -> FindingContract:
             ),
             evidence=(
                 EvidenceItem("authority_source", edge.source_url, source=edge.source_url),
+                EvidenceItem("declaring_origin", edge.declaring_origin, source=edge.source_url),
                 EvidenceItem("source_field", edge.source_field, source=edge.source_url),
                 EvidenceItem("authority_target", edge.target_url, source=edge.source_url),
+                EvidenceItem("target_origin", edge.target_origin, source=edge.source_url),
                 EvidenceItem("relationship_type", edge.relationship_type, source=edge.source_url),
                 EvidenceItem("boundary", edge.boundary, source=edge.source_url),
                 EvidenceItem("provenance", edge.provenance_kind, source=edge.source_url),
@@ -222,9 +226,11 @@ def _finding_for_edge(edge: AuthorityEdge) -> FindingContract:
             "authority_edge": {
                 "source_surface_type": edge.source_surface_type,
                 "source_url": edge.source_url,
+                "declaring_origin": edge.declaring_origin,
                 "source_field": edge.source_field,
                 "target_surface_type": edge.target_surface_type,
                 "target_url": edge.target_url,
+                "target_origin": edge.target_origin,
                 "relationship_type": edge.relationship_type,
                 "provenance_kind": edge.provenance_kind,
                 "boundary": edge.boundary,
