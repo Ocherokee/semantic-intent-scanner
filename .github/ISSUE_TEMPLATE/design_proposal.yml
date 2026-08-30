@@ -1,0 +1,95 @@
+name: Design proposal
+description: Propose a new invariant, authority structure, discovery surface, schema, or analyzer
+title: "[Design]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for research and security architecture changes. Keep ordinary bug fixes and bounded features in their respective forms.
+
+  - type: dropdown
+    id: design_kind
+    attributes:
+      label: Proposal class
+      options:
+        - New invariant
+        - New authority-bearing structure
+        - New discovery surface or network behavior
+        - Risk or severity change
+        - Schema evolution
+        - New analyzer
+        - New model dependency
+        - Other architecture change
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_threat
+    attributes:
+      label: Threat or problem statement
+      description: State the failure condition without assuming malicious intent when it is not observable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_evidence
+    attributes:
+      label: Structural evidence available
+      description: Identify exact fields, relationships, parser facts, or external-state evidence the scanner can observe.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_rule
+    attributes:
+      label: Proposed deterministic rule
+      description: Explain how the evidence maps to the proposed classification and where ambiguity remains.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_false_positives
+    attributes:
+      label: False-positive constraints
+      description: List nearby conditions that must not trigger the proposed behavior.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: design_layer
+    attributes:
+      label: Expected architectural layer
+      options:
+        - Detector or deterministic rule
+        - Finding contract
+        - Inventory or discovery
+        - Inventory diff or baseline
+        - Trust-boundary analysis
+        - CLI or reporting
+        - New layer requiring discussion
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_compatibility
+    attributes:
+      label: Compatibility and version implications
+      description: Address schemas, migrations, legacy output, risk behavior, network behavior, and independent version domains.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_testing
+    attributes:
+      label: Testing strategy
+      description: Include positive, negative, adversarial, determinism, mutation, and regression coverage as applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_non_goals
+    attributes:
+      label: Explicit non-goals
+      description: State what the proposal deliberately will not interpret, execute, fetch, or change.
+    validations:
+      required: true

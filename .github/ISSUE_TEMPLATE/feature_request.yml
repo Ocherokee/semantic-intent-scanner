@@ -1,0 +1,87 @@
+name: Feature request
+description: Propose a bounded improvement to existing scanner behavior
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the implementation. Larger architecture changes belong in the design-proposal form.
+
+  - type: textarea
+    id: feature_problem
+    attributes:
+      label: Problem or use case
+      description: What user or research problem is not addressed today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature_behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe observable behavior without assuming a particular implementation.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature_layer
+    attributes:
+      label: Architectural layer
+      options:
+        - Detector or deterministic rule
+        - Finding contract
+        - Inventory or discovery
+        - Inventory diff or baseline
+        - Trust-boundary analysis
+        - CLI or reporting
+        - Documentation or governance
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature_network
+    attributes:
+      label: Does this require new network access?
+      options:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature_model
+    attributes:
+      label: Does this require model or LLM judgment?
+      options:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature_schema
+    attributes:
+      label: Does this change a public schema or output?
+      options:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature_deterministic_alternative
+    attributes:
+      label: Deterministic alternative considered
+      description: Could structural evidence or a deterministic rule address the problem without model judgment?
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature_compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Note effects on schemas, existing outputs, detector/risk behavior, or offline operation.

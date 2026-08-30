@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Privately report a scanner vulnerability
+    url: https://github.com/Ocherokee/semantic-intent-scanner/security/advisories/new
+    about: Do not disclose exploitable scanner vulnerabilities in public issues. This link requires private vulnerability reporting to be enabled.
+  - name: Read the security policy
+    url: https://github.com/Ocherokee/semantic-intent-scanner/security/policy
+    about: Review scope, reporting guidance, and the private-reporting limitation.
