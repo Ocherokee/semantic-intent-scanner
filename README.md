@@ -33,6 +33,9 @@ semantic-intent inventory https://example.com
 
 # Compare two saved inventories offline without assigning risk
 semantic-intent inventory-diff previous.json current.json
+
+# Analyze supported structural authority crossings in a saved inventory
+semantic-intent trust-analyze inventory.json
 ```
 
 Run it against the repo's own fixtures to see a real offline detection in a few
@@ -112,6 +115,7 @@ The scanner now answers several questions, not one.
 **v0.5 adds:** Can findings be exchanged and retested without coupling them to one scanner implementation?
 **v0.6 adds:** What agent-readable surfaces does a site expose, how were they discovered, and what do they declare?
 **v0.7 adds:** What factual surface state changed between two validated inventory artifacts?
+**v0.8 adds:** Which explicitly supported declarations delegate action or capability authority across an origin boundary?
 
 ---
 
@@ -436,9 +440,10 @@ reach it.
 - [x] v0.5 — Stable machine-readable finding contract (`schema_version: "0.1"`)
 - [x] v0.6 — Agent-readable attack-surface inventory (`inventory_schema_version: "0.1"`)
 - [x] v0.7 — Deterministic inventory baselines and change detection (`change_schema_version: "0.1"`)
-- [ ] v0.8 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
-- [ ] v0.9 — False-positive analysis, threshold calibration
-- [ ] v0.10 — Relational integrity monitor (conversational trajectory evaluation)
+- [x] v0.8 — Deterministic structural trust-boundary analysis using v0.5 findings
+- [ ] v0.9 — Benchmark against a labelled corpus / ToxicSkills-derived dataset
+- [ ] v0.10 — False-positive analysis, threshold calibration
+- [ ] v0.11 — Relational integrity monitor (conversational trajectory evaluation)
 - [ ] v1.0 — Publishable research findings
 
 The v0.5 contract is independently versioned from the scanner package and
@@ -457,6 +462,11 @@ The v0.7 offline comparison layer validates two inventory artifacts and reports
 only deterministic factual changes. It does not retrieve resources, create
 findings, or interpret security impact. See
 [`docs/v0.7-inventory-baselines.md`](docs/v0.7-inventory-baselines.md).
+
+The v0.8 offline analysis layer extracts only supported authority-bearing
+manifest and schema declarations. It detects structural origin crossings, not
+semantic maliciousness or prompt injection. See
+[`docs/v0.8-trust-boundary-analysis.md`](docs/v0.8-trust-boundary-analysis.md).
 
 **The next priority is empirical, not conceptual:** benchmark the frozen I1–I8
 system, characterize false positives and false negatives, and calibrate risk
