@@ -7,16 +7,19 @@ detectors, assign risk, produce findings, or interpret retrieved instructions.
 from __future__ import annotations
 
 import copy
-import ipaddress
 import json
 import math
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 
 from .remote_fetch import FetchOutcome, Resolver, Transport, guarded_fetch
+from .url_normalization import (
+    URLNormalizationError, canonical_https_origin, canonicalize_https_url,
+    https_origin_key,
+)
 
 INVENTORY_SCHEMA_VERSION = "0.1"
 SUPPORTED_INVENTORY_SCHEMA_VERSIONS = frozenset({INVENTORY_SCHEMA_VERSION})
@@ -115,90 +118,26 @@ class _EntryBuilder:
     metadata: dict[str, Any]
 
 
-def _remove_dot_segments(path: str) -> str:
-    """Apply RFC 3986 dot-segment removal without collapsing empty segments."""
-    source = path
-    output = ""
-    while source:
-        if source.startswith("../"):
-            source = source[3:]
-        elif source.startswith("./"):
-            source = source[2:]
-        elif source.startswith("/./"):
-            source = source[2:]
-        elif source == "/.":
-            source = "/"
-        elif source.startswith("/../"):
-            source = source[3:]
-            output = output.rsplit("/", 1)[0]
-        elif source == "/..":
-            source = "/"
-            output = output.rsplit("/", 1)[0]
-        elif source in {".", ".."}:
-            source = ""
-        else:
-            start = 1 if source.startswith("/") else 0
-            slash = source.find("/", start)
-            if slash < 0:
-                output += source
-                source = ""
-            else:
-                output += source[:slash]
-                source = source[slash:]
-    return output or "/"
-
-
 def canonicalize_url(url: str) -> str:
     """Canonicalize a public HTTPS resource without changing its query."""
-    if not isinstance(url, str) or not url.strip():
-        raise InventoryError("resource URL must be a non-empty string")
     try:
-        parsed = urlsplit(url.strip())
-        port = parsed.port
-    except ValueError as exc:
-        raise InventoryError(f"invalid resource URL: {exc}") from exc
-    if parsed.scheme.lower() != "https":
-        raise InventoryError("inventory supports HTTPS resources only")
-    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
-        raise InventoryError("resource URL requires a hostname and must not contain userinfo")
-    host = parsed.hostname.lower()
-    if host.endswith(".."):
-        raise InventoryError("resource URL hostname has multiple trailing dots")
-    host = host.removesuffix(".")
-    if not host:
-        raise InventoryError("resource URL requires a hostname")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        try:
-            host = host.encode("idna").decode("ascii").lower()
-        except UnicodeError as exc:
-            raise InventoryError("resource URL hostname is not valid IDNA") from exc
-        labels = host.split(".")
-        if any(
-            not label or len(label) > 63
-            or label.startswith("-") or label.endswith("-")
-            or re.fullmatch(r"[a-z0-9-]+", label) is None
-            for label in labels
-        ) or len(host) > 253:
-            raise InventoryError("resource URL hostname is malformed")
-        canonical_host = host
-    else:
-        canonical_host = f"[{address.compressed}]" if address.version == 6 else address.compressed
-    netloc = canonical_host if port in (None, 443) else f"{canonical_host}:{port}"
-    path = _remove_dot_segments(parsed.path or "/")
-    return urlunsplit(("https", netloc, path, parsed.query, ""))
+        return canonicalize_https_url(url)
+    except URLNormalizationError as exc:
+        raise InventoryError(str(exc)) from exc
 
 
 def canonical_origin(url: str) -> str:
-    canonical = canonicalize_url(url)
-    parsed = urlsplit(canonical)
-    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    try:
+        return canonical_https_origin(url)
+    except URLNormalizationError as exc:
+        raise InventoryError(str(exc)) from exc
 
 
 def _origin_key(url: str) -> tuple[str, str, int]:
-    parsed = urlsplit(canonicalize_url(url))
-    return (parsed.scheme, parsed.hostname or "", parsed.port or 443)
+    try:
+        return https_origin_key(url)
+    except URLNormalizationError as exc:
+        raise InventoryError(str(exc)) from exc
 
 
 def _same_origin(left: str, right: str) -> bool:
@@ -322,6 +261,8 @@ def _parse_manifest(text: str, source_url: str) -> tuple[list[tuple[str, str, di
     for key in ("mcp_endpoint", "agent_endpoint", "endpoint", "url"):
         value = payload.get(key)
         if not isinstance(value, str):
+            if key in payload:
+                metadata[f"{key}_declaration_error"] = f"{key} must be a string"
             continue
         try:
             url = canonicalize_url(urljoin(source_url, value))

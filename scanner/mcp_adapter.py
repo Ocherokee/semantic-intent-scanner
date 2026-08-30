@@ -192,6 +192,8 @@ def _tool_fields(tool: dict) -> list[tuple[str, str, str]]:
         walked: list[tuple[str, str, str]] = []
         _walk_descriptions(schema, ["parameters"], "inputSchema", walked)
         fields.extend(walked)
+    elif "inputSchema" in tool and schema is not None:
+        raise ValueError("MCP tool inputSchema must be an object or array")
     return fields
 
 
@@ -265,9 +267,9 @@ def audit_mcp_tools(
 
     try:
         raw = Path(source).read_text("utf-8")
-    except OSError as exc:
-        return _bail(result, parse_error=f"cannot read input: {exc}",
-                     note=f"cannot read {source}: {exc}", judge=judge)
+    except OSError:
+        return _bail(result, parse_error="input cannot be read",
+                     note="captured MCP input cannot be read", judge=judge)
 
     if len(raw.encode("utf-8")) > MAX_MCP_INPUT_BYTES:
         return _bail(result, parse_error=f"input exceeds {MAX_MCP_INPUT_BYTES} byte limit",
@@ -276,8 +278,9 @@ def audit_mcp_tools(
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        return _bail(result, parse_error=f"not valid JSON: {exc}",
-                     note=f"{source} is not valid JSON: {exc}", judge=judge)
+        location = f"line {exc.lineno}, column {exc.colno}"
+        return _bail(result, parse_error=f"not valid JSON at {location}",
+                     note=f"captured MCP input is not valid JSON at {location}", judge=judge)
 
     label = _server_label(payload, server_label)
     result["mcp_server"] = {"declared": label, "authenticated": False}
@@ -291,6 +294,11 @@ def audit_mcp_tools(
 
     tool_dicts = [t for t in (tools or []) if isinstance(t, dict)]
     if not tool_dicts:
+        if tools:
+            return _bail(
+                result, parse_error="tools array contains no object definitions",
+                note="captured MCP input contains malformed tool definitions", judge=judge,
+            )
         # well-formed, just nothing to evaluate -> "no_tools", not "invalid_input"
         return _bail(result, parse_error=None,
                      note="the input parsed but contained no tool definitions",

@@ -40,9 +40,12 @@ from datetime import datetime, timezone
 from typing import Callable
 from urllib.parse import urljoin, urlparse
 
+from .url_normalization import URLNormalizationError, canonicalize_https_url, https_origin_key
+
 MAX_BODY_BYTES = 512 * 1024
 CONNECT_READ_TIMEOUT = 5.0
 MAX_REDIRECTS = 5
+MAX_FETCH_FAILURE_REASON_LENGTH = 240
 
 # Extra explicit denylist for well-known cloud metadata endpoints. These are
 # already covered by the link-local / unique-local checks, but naming them
@@ -61,6 +64,13 @@ Transport = Callable[..., "RawResponse"]        # (method, url, headers, timeout
 
 class RemoteFetchBlocked(Exception):
     """A URL (initial or redirect target) failed the SSRF guard."""
+
+
+def _bounded_failure(value: str) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= MAX_FETCH_FAILURE_REASON_LENGTH:
+        return normalized
+    return normalized[: MAX_FETCH_FAILURE_REASON_LENGTH - 3] + "..."
 
 
 @dataclass
@@ -145,6 +155,10 @@ def resolve_and_validate(url: str, resolver: Resolver = _system_resolver) -> lis
     host = p.hostname
     if not host:
         raise RemoteFetchBlocked("URL has no host")
+    try:
+        canonicalize_https_url(url)
+    except URLNormalizationError as exc:
+        raise RemoteFetchBlocked(str(exc)) from exc
 
     # Host given as a literal IP: validate directly.
     try:
@@ -161,7 +175,7 @@ def resolve_and_validate(url: str, resolver: Resolver = _system_resolver) -> lis
     try:
         ips = resolver(host)
     except (socket.gaierror, OSError) as exc:
-        raise RemoteFetchBlocked(f"{host}: DNS resolution failed ({exc})") from exc
+        raise RemoteFetchBlocked(f"{host}: DNS resolution failed") from exc
     if not ips:
         raise RemoteFetchBlocked(f"{host}: DNS returned no addresses")
     for ip in ips:
@@ -322,25 +336,29 @@ def guarded_fetch(url: str, *, transport: Transport | None = None, resolver: Res
         try:
             resolve_and_validate(current, resolver)
         except RemoteFetchBlocked as exc:
+            reason = _bounded_failure(str(exc))
             return FetchOutcome(
                 requested_url=url, final_url=None, status=0, content_type=None, body=b"",
                 sha256=None, fetched_at=fetched_at, redirect_chain=chain,
                 cross_origin_redirect=_chain_crossed_origin(url, chain),
-                blocked_reason=str(exc), error=f"blocked: {exc}",
+                blocked_reason=reason, error=f"blocked: {reason}",
             )
 
         try:
             raw = transport("GET", current, dict(_STATIC_HEADERS), timeout, resolver)
         except RemoteFetchBlocked as exc:
+            reason = _bounded_failure(str(exc))
             return FetchOutcome(
                 requested_url=url, final_url=None, status=0, content_type=None, body=b"",
                 sha256=None, fetched_at=fetched_at, redirect_chain=chain,
-                blocked_reason=str(exc), error=f"blocked: {exc}",
+                blocked_reason=reason, error=f"blocked: {reason}",
             )
         except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
+            failure_kind = type(exc).__name__
             return FetchOutcome(
                 requested_url=url, final_url=None, status=0, content_type=None, body=b"",
-                sha256=None, fetched_at=fetched_at, redirect_chain=chain, error=str(exc),
+                sha256=None, fetched_at=fetched_at, redirect_chain=chain,
+                error=f"transport failure ({failure_kind})",
             )
 
         chain.append({"url": current, "status": raw.status})
@@ -379,8 +397,7 @@ def guarded_fetch(url: str, *, transport: Transport | None = None, resolver: Res
 
 
 def _origin(url: str) -> tuple[str, str | None, int]:
-    p = urlparse(url)
-    return (p.scheme, p.hostname, p.port or (443 if p.scheme == "https" else 80))
+    return https_origin_key(url)
 
 
 def _chain_crossed_origin(start_url: str, chain: list[dict]) -> bool:
