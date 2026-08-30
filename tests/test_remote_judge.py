@@ -221,10 +221,18 @@ def test_is_material_disagreement(a, b, material):
 from pathlib import Path  # noqa: E402
 
 _FIX = Path(__file__).parent / "fixtures" / "llms_txt" / "adversarial"
-requires_api_key = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set; live judge requires API access",
-)
+
+
+def requires_api_key(fn):
+    """Live-model gate: mark the test ``live_model`` (out of the deterministic
+    release gate) and skip it when no credential is present."""
+    fn = pytest.mark.live_model(fn)
+    return pytest.mark.skipif(
+        not os.environ.get("ANTHROPIC_API_KEY"),
+        reason="ANTHROPIC_API_KEY not set; live judge requires API access",
+    )(fn)
+
+
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 

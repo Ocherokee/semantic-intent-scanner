@@ -7,9 +7,11 @@ turns tests/fixtures/ from a folder of example files into an actual
 regression suite — nothing previously executed these or checked the
 result.
 
-Requires ANTHROPIC_API_KEY (evaluate_skill uses claude-opus-4-5 as
-LLM-as-judge). Skipped automatically if the key isn't set, so this
-doesn't break CI runs that lack API access.
+Requires ANTHROPIC_API_KEY (evaluate_skill calls the model named in
+scanner.model_config.SEMANTIC_EVALUATOR_MODEL). Skipped automatically if the
+key isn't set. Every test here is model-backed and probabilistic, so the
+whole module carries the ``live_model`` marker and sits outside the
+deterministic release gate -- see docs/model-boundary.md.
 """
 
 import os
@@ -20,6 +22,8 @@ import pytest
 from scanner.evaluator import evaluate_skill
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+pytestmark = pytest.mark.live_model
 
 requires_api_key = pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"),

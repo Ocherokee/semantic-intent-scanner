@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["jsonschema>=4.18"]
+test = ["jsonschema>=4.18", "referencing>=0.30", "pytest>=7.4", "build>=1.0"]
 
 [project.scripts]
 semantic-intent = "scanner.cli:main"
@@ -25,3 +25,9 @@ Repository = "https://github.com/Ocherokee/semantic-intent-scanner"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["scanner*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "live_model: exercises a live Anthropic model; excluded from the deterministic release gate",
+]
+testpaths = ["tests"]

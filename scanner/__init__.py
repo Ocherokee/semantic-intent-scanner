@@ -20,6 +20,7 @@ from .finding_contract import (
     validate_finding_contract,
 )
 from .invariants import INVARIANTS, INVARIANT_MAP
+from .model_config import JUDGE_MODEL, SEMANTIC_EVALUATOR_MODEL
 from .inventory_diff import (
     CHANGE_SCHEMA_VERSION,
     InventoryChangeSet,
@@ -68,6 +69,8 @@ __all__ = [
     "validate_finding_contract",
     "INVARIANTS",
     "INVARIANT_MAP",
+    "JUDGE_MODEL",
+    "SEMANTIC_EVALUATOR_MODEL",
     "CHANGE_SCHEMA_VERSION",
     "InventoryChangeSet",
     "compare_inventories",

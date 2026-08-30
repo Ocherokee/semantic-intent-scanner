@@ -14,6 +14,7 @@ from typing import Any
 import anthropic
 
 from .invariants import INVARIANTS
+from .model_config import SEMANTIC_EVALUATOR_MODEL
 from .substrate import get_bridge_for_invariant, get_mechanisms_for_invariant
 
 # ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ def evaluate_chunk(client: anthropic.Anthropic, chunk: str) -> dict[str, Any]:
     )
 
     response = client.messages.create(
-        model="claude-opus-4-5",
+        model=SEMANTIC_EVALUATOR_MODEL,
         max_tokens=1500,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
