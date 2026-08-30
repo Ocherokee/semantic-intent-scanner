@@ -486,11 +486,15 @@ later version. The full canonical license text is in [LICENSE](LICENSE).
 
 ---
 
-## Contributing
+## Contributing and security
 
 This is early-stage research. Issues, adversarial test cases, and pull requests
 are welcome. The most valuable contributions right now are labelled benchmark
 cases and genuinely ambiguous edge cases.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and review expectations,
+[SECURITY.md](SECURITY.md) for private vulnerability reporting, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community participation standards.
 
 ---
 

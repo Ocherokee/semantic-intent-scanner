@@ -1,0 +1,101 @@
+name: Bug report
+description: Report reproducible scanner behavior that is not an exploitable vulnerability
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a reproducible defect.
+
+        **Do not report exploitable scanner vulnerabilities here.** Use the private security-reporting path described in the repository [security policy](https://github.com/Ocherokee/semantic-intent-scanner/security/policy).
+
+  - type: checkboxes
+    id: bug_security_ack
+    attributes:
+      label: Security-reporting check
+      options:
+        - label: This report does not disclose an exploitable scanner vulnerability.
+          required: true
+
+  - type: input
+    id: bug_version
+    attributes:
+      label: Scanner version or commit
+      description: Provide the package version and exact commit when available.
+      placeholder: 0.4.0.dev0 or commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: bug_environment
+    attributes:
+      label: Python version and platform
+      placeholder: Python 3.11.9 on Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_command
+    attributes:
+      label: Command used
+      description: Include arguments, but remove credentials and secrets.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_reproduction
+    attributes:
+      label: Minimal reproducible input and steps
+      description: Reduce fixtures or artifacts to the smallest input that still reproduces the behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_output
+    attributes:
+      label: Relevant output
+      description: Include errors or reports needed to diagnose the issue. Remove sensitive data.
+      render: text
+
+  - type: dropdown
+    id: bug_model_access
+    attributes:
+      label: Was API or model access involved?
+      options:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bug_network_access
+    attributes:
+      label: Was network retrieval or external state involved?
+      options:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_additional
+    attributes:
+      label: Additional context
+      description: Note redirects, DNS, registries, judge mode, or other relevant conditions.
