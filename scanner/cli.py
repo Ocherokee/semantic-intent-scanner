@@ -16,6 +16,8 @@ Usage:
                                                 Compare two inventory artifacts offline
     semantic-intent trust-analyze <inventory.json>
                                                 Analyze structural authority crossings offline
+    semantic-intent audit [explicit input flags]
+                                                Run selected analyzers into one finding stream
 """
 
 import argparse
@@ -23,6 +25,16 @@ import json
 import sys
 from pathlib import Path
 
+from .composite_audit import (
+    composite_exit_code,
+    directory_adapter,
+    mcp_adapter as composite_mcp_adapter,
+    remote_adapter as composite_remote_adapter,
+    run_composite,
+    semantic_adapter,
+    serialize_composite_audit,
+    trust_adapter,
+)
 from .directory_audit import audit_directory
 from .evaluator import evaluate_skill
 from .inventory_diff import compare_inventories, serialize_change_set
@@ -266,6 +278,53 @@ def cmd_trust_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _numbered_id(base: str, index: int) -> str:
+    return base if index == 0 else f"{base}:{index + 1}"
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Run only explicitly selected existing analyzers into a v0.9 artifact."""
+    adapters = []
+    if args.judge and not (args.remote or args.mcp):
+        print("Error: --judge requires at least one --remote or --mcp input", file=sys.stderr)
+        return 3
+    if args.server_label is not None and not args.mcp:
+        print("Error: --server-label requires at least one --mcp input", file=sys.stderr)
+        return 3
+    judge_cb = None
+    if args.judge:
+        from .remote_judge import judge_document
+
+        judge_cb = lambda doc, det: judge_document(  # noqa: E731
+            doc, det, api_key=args.api_key,
+        )
+
+    for index, value in enumerate(args.directory or []):
+        adapters.append(directory_adapter(_numbered_id("directory", index), value))
+    for index, value in enumerate(args.skill or []):
+        adapters.append(semantic_adapter(
+            _numbered_id("semantic", index), value, api_key=args.api_key,
+        ))
+    for index, value in enumerate(args.remote or []):
+        adapters.append(composite_remote_adapter(
+            _numbered_id("remote", index), value, judge=judge_cb,
+        ))
+    for index, value in enumerate(args.mcp or []):
+        adapters.append(composite_mcp_adapter(
+            _numbered_id("mcp", index), value, judge=judge_cb,
+            server_label=args.server_label,
+        ))
+    for index, value in enumerate(args.trust_inventory or []):
+        adapters.append(trust_adapter(_numbered_id("trust", index), value))
+
+    if not adapters:
+        print("Error: audit requires at least one explicit analyzer input", file=sys.stderr)
+        return 3
+    artifact = run_composite(adapters)
+    print(serialize_composite_audit(artifact))
+    return composite_exit_code(artifact)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="semantic-intent",
@@ -345,6 +404,43 @@ def main() -> None:
     )
     trust_parser.add_argument("inventory", help="Path to an inventory JSON artifact")
 
+    audit_parser = subparsers.add_parser(
+        "audit",
+        help="Run explicitly selected analyzers into one canonical finding stream",
+    )
+    audit_parser.add_argument(
+        "--directory", action="append",
+        help="Audit one local directory (repeatable; offline directory analyzer)",
+    )
+    audit_parser.add_argument(
+        "--skill", action="append",
+        help="Evaluate one local skill file (repeatable; existing model-backed analyzer)",
+    )
+    audit_parser.add_argument(
+        "--remote", action="append",
+        help="Audit one HTTPS remote target (repeatable; existing guarded-fetch path)",
+    )
+    audit_parser.add_argument(
+        "--mcp", action="append",
+        help="Audit one captured MCP tools/list JSON file (repeatable; no MCP transport)",
+    )
+    audit_parser.add_argument(
+        "--trust-inventory", action="append",
+        help="Analyze one saved inventory artifact (repeatable; offline)",
+    )
+    audit_parser.add_argument(
+        "--judge", action="store_true",
+        help="Use the existing optional judge for selected remote/MCP analyzers",
+    )
+    audit_parser.add_argument(
+        "--api-key", default=None,
+        help="Anthropic API key for --skill or --judge (defaults to environment)",
+    )
+    audit_parser.add_argument(
+        "--server-label", default=None,
+        help="MCP provenance label applied to explicitly selected captured files",
+    )
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -359,6 +455,8 @@ def main() -> None:
         sys.exit(cmd_inventory_diff(args))
     if args.command == "trust-analyze":
         sys.exit(cmd_trust_analyze(args))
+    if args.command == "audit":
+        sys.exit(cmd_audit(args))
 
 
 if __name__ == "__main__":

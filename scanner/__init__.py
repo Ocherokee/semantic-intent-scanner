@@ -1,6 +1,13 @@
 """Semantic Intent Scanner - invariant-grounded evaluation of AI agent skill files and remote content."""
 
 from .directory_audit import audit_directory
+from .composite_audit import (
+    COMPOSITE_SCHEMA_VERSION,
+    CompositeAudit,
+    run_composite,
+    serialize_composite_audit,
+    validate_composite_audit,
+)
 from .evaluator import evaluate_skill
 from .finding_contract import (
     FINDING_SCHEMA_VERSION,
@@ -45,6 +52,11 @@ from .trust_analysis import (
 
 __all__ = [
     "audit_directory",
+    "COMPOSITE_SCHEMA_VERSION",
+    "CompositeAudit",
+    "run_composite",
+    "serialize_composite_audit",
+    "validate_composite_audit",
     "evaluate_skill",
     "FINDING_SCHEMA_VERSION",
     "FindingContract",
