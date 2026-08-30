@@ -7,11 +7,10 @@ turns tests/fixtures/ from a folder of example files into an actual
 regression suite — nothing previously executed these or checked the
 result.
 
-Requires ANTHROPIC_API_KEY (evaluate_skill calls the model named in
-scanner.model_config.SEMANTIC_EVALUATOR_MODEL). Skipped automatically if the
-key isn't set. Every test here is model-backed and probabilistic, so the
-whole module carries the ``live_model`` marker and sits outside the
-deterministic release gate -- see docs/model-boundary.md.
+Requires ANTHROPIC_API_KEY (evaluate_skill makes a live Anthropic call).
+Skipped automatically if the key isn't set. Every test here is model-backed
+and probabilistic, so the whole module carries the ``live_model`` marker and
+sits outside the deterministic release gate -- see docs/model-boundary.md.
 """
 
 import os

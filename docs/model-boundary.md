@@ -13,16 +13,15 @@ inputs it produces the same findings, the same severities, the same schema
 artifacts, and the same exit codes. It performs no model call.
 
 **A fresh checkout with no `ANTHROPIC_API_KEY` runs the entire deterministic
-test suite.** That is enforced, not aspirational:
+test suite.** The `live_model` marker names the model-backed tests, so the
+deterministic gate is:
 
 ```
-pytest -m "not live_model" --fail-on-skip
+pytest -m "not live_model"
 ```
 
-`--fail-on-skip` turns any skipped test into a failure, so a deterministic
-test that quietly stops running (a broken import guard, a stray platform
-gate) fails the build. The deterministic gate currently reports
-**407 passed, 8 deselected, 0 skipped**.
+With no credential this deselects exactly the eight `live_model` tests
+(§3) and skips nothing else.
 
 Deterministic surfaces:
 
@@ -60,18 +59,17 @@ fails the build if any other `scanner/` module imports `anthropic` or names
 
 ### Model identifiers (tested assumptions)
 
-Single-sourced in `scanner/model_config.py`:
+Each lane names its model inline:
 
-| Constant | Value | Used by |
-| --- | --- | --- |
-| `SEMANTIC_EVALUATOR_MODEL` | `claude-opus-4-5` | `scanner/evaluator.py` |
-| `JUDGE_MODEL` | `claude-opus-5` | `scanner/remote_judge.py` (`DEFAULT_JUDGE_MODEL`) |
+| Where | Value |
+| --- | --- |
+| `scanner/evaluator.py` (`evaluate_chunk`) | `claude-opus-4-5` |
+| `scanner/remote_judge.py` (`DEFAULT_JUDGE_MODEL`) | `claude-opus-5` |
 
-`SEMANTIC_EVALUATOR_MODEL` is a **superseded** identifier. It was left
-unchanged in v0.11 because the semantic lane is probabilistic and was not
-exercised in this slice; changing it is a probabilistic-path change that
-belongs in a protected pre-release evaluation. Tracked as a required pre-1.0
-item in `docs/v1.0-release-readiness.md`.
+The semantic evaluator's identifier (`claude-opus-4-5`) is superseded. It is
+left unchanged here because changing it alters a probabilistic path that was
+not exercised in this slice; that change belongs in a protected pre-release
+evaluation. See `docs/v1.0-release-readiness.md`.
 
 ### Contract of the judge lane (mocked-client tested)
 
@@ -87,14 +85,14 @@ is deterministic and is covered by fake-client tests
 | Pass-1 / Pass-2 material disagreement becomes its own escalated finding | `test_material_disagreement_becomes_its_own_finding_and_escalates` |
 | Response parsing; unparseable → `unavailable:parse_error` | `test_unparseable_response_is_unavailable_parse_error` |
 | API exception → `unavailable:api_error`, no crash | `test_api_exception_is_unavailable_api_error` |
-| No credential → `unavailable:no_api_key`, zero calls | `test_no_api_key_is_unavailable_not_a_crash`, `test_judge_without_credential_fails_closed` |
+| No credential → `unavailable:no_api_key`, zero calls | `test_no_api_key_is_unavailable_not_a_crash` |
 | Evidence boundary: Pass 1 gets a bounded structured digest, never raw body | `test_claims_block_is_structured_and_bounded_no_raw_body` |
 | Evidence boundary: deterministic findings are the *trusted* input block | `test_findings_block_marks_deterministic_as_the_trusted_input` |
 | Large body chunked, per-chunk verdicts reconciled | `test_pass2_chunks_a_large_body_and_reconciles_worst_chunk` |
-| Semantic coverage roll-up (`complete` / `partial` / `incomplete`) | `test_partial_judge_coverage_across_documents`, `test_*_semantic_coverage` |
+| Semantic coverage roll-up (`complete` / `partial` / `incomplete`) | `test_partial_judge_coverage_across_documents` |
 | **Non-downgrade**: a judge result never lowers a deterministic severity | `test_judge_never_lowers_a_deterministic_critical` |
 | Judge failure never becomes an operational failure (exit code unchanged) | `test_judge_failure_is_not_destructive`, `test_all_documents_judge_fail_is_not_exit_3` |
-| `--judge` absent → byte-identical to the deterministic run, no `judge*` keys | `test_judge_default_off_leaves_result_and_report_unchanged`, `test_default_no_judge_adds_no_keys` |
+| `--judge` absent → byte-identical to the deterministic run, no `judge*` keys | `test_judge_default_off_leaves_result_and_report_unchanged`, `test_default_no_judge_adds_no_judge_keys` |
 
 ### What is *not* promised
 
@@ -102,8 +100,8 @@ is deterministic and is covered by fake-client tests
 * that adversarial prompt-injection resistance holds for future model
   versions (the live tests record current behaviour, not a guarantee);
 * that a semantic finding will appear where a human would expect one, or that
-  one will not appear where a human would not (efficacy is uncalibrated — see
-  `docs/v0.11-calibration.md`).
+  one will not appear where a human would not — semantic efficacy is
+  uncalibrated.
 
 ### Guarantees that *do* hold under model failure or model nonsense
 
@@ -118,17 +116,17 @@ is deterministic and is covered by fake-client tests
 
 ## 3. Live tests
 
-The eight `live_model`-marked tests make real API calls. They are **not** a
-pull-request gate. They run only via the manually-dispatched
-`.github/workflows/live-model.yml` workflow, which is bound to a protected
-GitHub Environment so the `ANTHROPIC_API_KEY` secret is never exposed to
-fork-PR code. See `docs/cli-contract.md` §"CI" and the workflow file's header
-comment for the one-time repository-settings step an admin must perform.
+Eight tests carry the `live_model` marker and make real API calls
+(`tests/test_fixtures.py` in full, plus `test_live_judge_*` in
+`tests/test_mcp_adapter.py` and `tests/test_remote_judge.py`). They also skip
+themselves when `ANTHROPIC_API_KEY` is absent.
+
+They are **not** a pull-request gate. Run them locally with a key:
 
 ```
-# locally, with a key in the environment:
 pytest -m live_model
 ```
 
-They are integration coverage and calibration inputs, not evidence of a
-stable contract.
+An isolated CI job that runs them without exposing the credential to
+fork-PR code is future work, not part of this slice. They are integration
+coverage and calibration inputs, not evidence of a stable contract.

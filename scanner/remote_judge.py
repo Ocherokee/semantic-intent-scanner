@@ -34,7 +34,6 @@ import anthropic
 
 from .evaluator import chunk_skill
 from .invariants import INVARIANTS
-from .model_config import JUDGE_MODEL
 from .remote_audit import (
     Finding,
     RemoteDocument,
@@ -42,7 +41,7 @@ from .remote_audit import (
     extract_referenced_domains,
 )
 
-DEFAULT_JUDGE_MODEL = JUDGE_MODEL
+DEFAULT_JUDGE_MODEL = "claude-opus-5"
 
 _MAX_TOKENS = 1500
 # Pass 1 minimises semantic payload: structured facts first, and any quote it
