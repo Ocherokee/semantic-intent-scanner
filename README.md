@@ -446,9 +446,24 @@ reach it.
 - [x] v0.7 — Deterministic inventory baselines and change detection (`change_schema_version: "0.1"`)
 - [x] v0.8 — Deterministic structural trust-boundary analysis using v0.5 findings
 - [x] v0.9 — Deterministic composite orchestration over existing finding-producing analyzers
-- [ ] v0.10 — False-positive analysis, threshold calibration
-- [ ] v0.11 — Relational integrity monitor (conversational trajectory evaluation)
-- [ ] v1.0 — Publishable research findings
+- [x] v0.10 — Contract and boundary hardening
+  - formal Draft 2020-12 schemas for finding, inventory, change, and composite artifacts
+  - centralized URL/origin normalization
+  - malformed-declaration visibility
+  - deterministic resource bounds
+  - structural-locator and public-failure hardening
+  - credential-free deterministic release gate verified locally
+- [ ] v0.11 — Release stabilization
+  - empirical/regression measurement without unjustified threshold tuning
+  - explicit deterministic/model-backed boundary
+  - CI and schema-drift gates
+  - build, wheel, and clean-install verification
+  - complete CLI and network-contract documentation
+- [ ] v1.0 — Stable release contract
+  - release-only versioning
+  - release notes and artifacts
+  - clean-install verification
+  - disclosure-route and repository-protection verification
 
 The v0.5 contract is independently versioned from the scanner package and
 legacy report envelopes. It defines canonical observation, rationale,
@@ -478,10 +493,15 @@ v0.5 findings. It adds no composite severity, aggregate risk, fuzzy
 deduplication, or new analyzer authority. See
 [`docs/v0.9-composite-audit.md`](docs/v0.9-composite-audit.md).
 
-**The next priority is empirical, not conceptual:** benchmark the frozen I1–I8
-system, characterize false positives and false negatives, and calibrate risk
-thresholds. Misclassifications should become retained test cases rather than an
-excuse to move the invariants during measurement.
+The current fixtures are useful regression material, but they are not an
+independent empirical calibration corpus and do not yet justify changing risk
+thresholds. v0.11 should measure deterministic behavior honestly, retain
+material misses and false positives as regressions, and make the model-backed
+boundary explicit before any threshold change is considered.
+
+Post-1.0 research may explore relational integrity monitoring across
+conversational trajectories. That work is not assigned to v0.11 or to another
+release number in the current roadmap.
 
 ---
 
