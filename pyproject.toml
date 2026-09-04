@@ -25,3 +25,8 @@ Repository = "https://github.com/Ocherokee/semantic-intent-scanner"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["scanner*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "live_model: exercises a live Anthropic model; excluded from the deterministic release gate",
+]

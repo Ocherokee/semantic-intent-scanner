@@ -358,10 +358,14 @@ def test_default_no_judge_adds_no_judge_keys():
 # API-gated: the real judge over the adversarial fixtures
 # ---------------------------------------------------------------------------
 
-requires_api_key = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set; live judge requires API access",
-)
+def requires_api_key(fn):
+    """Live-model gate: mark the test ``live_model`` (out of the deterministic
+    release gate) and skip it when no credential is present."""
+    fn = pytest.mark.live_model(fn)
+    return pytest.mark.skipif(
+        not os.environ.get("ANTHROPIC_API_KEY"),
+        reason="ANTHROPIC_API_KEY not set; live judge requires API access",
+    )(fn)
 
 
 @requires_api_key
