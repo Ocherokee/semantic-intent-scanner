@@ -40,14 +40,14 @@ def test_model_entry_is_not_executed_even_with_missing_fixture(tmp_path):
     assert run_manifest(_write_manifest(tmp_path, [entry]))["summary"]["model_entries_not_executed"] == 1
 
 
-@pytest.mark.parametrize("assertion, expected, actual, status", [
+@pytest.mark.parametrize("assertion, recorded, actual, status", [
     ("exact", "low", "low", "pass"),
     ("exact", "medium", "low", "fail"),
     ("floor", "medium", "high", "pass"),
     ("floor", "high", "medium", "fail"),
     ("none", "critical", "low", "not-asserted"),
 ])
-def test_assertion_modes(monkeypatch, tmp_path, assertion, expected, actual, status):
+def test_assertion_modes(monkeypatch, tmp_path, assertion, recorded, actual, status):
     fixture = tmp_path / "fixture.json"
     fixture.write_text("{}", encoding="utf-8")
     entry = {
@@ -57,7 +57,7 @@ def test_assertion_modes(monkeypatch, tmp_path, assertion, expected, actual, sta
         "invocation": {},
         "evaluation": {"intended_detector": "deterministic"},
         "regression": {"deterministic": {
-            "observed_risk": expected,
+            "observed_risk": recorded,
             "test_assertion": assertion,
         }},
     }
@@ -66,7 +66,7 @@ def test_assertion_modes(monkeypatch, tmp_path, assertion, expected, actual, sta
     assert report["cases"][0]["status"] == status
 
 
-def test_expected_finding_types_are_required_but_extra_types_are_allowed(monkeypatch, tmp_path):
+def test_recorded_finding_types_remain_present_while_extra_types_are_allowed(monkeypatch, tmp_path):
     entry = copy.deepcopy(load_manifest(MANIFEST)["entries"][0])
     entry["fixture"] = "unused"
     monkeypatch.setattr("evaluation.run_regressions._execute", lambda *_: {

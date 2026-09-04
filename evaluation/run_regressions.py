@@ -139,16 +139,16 @@ def run_manifest(path: Path) -> dict[str, Any]:
         assertion = contract["test_assertion"]
         actual_risk = result.get("overall_risk")
         actual_types = sorted({item.get("finding_type") for item in result.get("findings", [])})
-        expected_types = sorted(contract.get("observed_finding_types", []))
+        recorded_types = sorted(contract.get("observed_finding_types", []))
         reasons = []
         if assertion == "exact" and actual_risk != contract["observed_risk"]:
-            reasons.append(f"risk expected {contract['observed_risk']}, observed {actual_risk}")
+            reasons.append(f"risk recorded {contract['observed_risk']}, observed {actual_risk}")
         elif assertion == "floor" and (
             actual_risk not in RISK_ORDER
             or RISK_ORDER[actual_risk] < RISK_ORDER[contract["observed_risk"]]
         ):
             reasons.append(f"risk floor {contract['observed_risk']}, observed {actual_risk}")
-        missing_types = sorted(set(expected_types) - set(actual_types))
+        missing_types = sorted(set(recorded_types) - set(actual_types))
         if missing_types:
             reasons.append("missing finding types: " + ", ".join(missing_types))
         status = "not-asserted" if assertion == "none" and not reasons else ("fail" if reasons else "pass")
@@ -158,9 +158,9 @@ def run_manifest(path: Path) -> dict[str, Any]:
                 "id": case_id,
                 "status": status,
                 "assertion": assertion,
-                "expected_risk": contract["observed_risk"],
+                "recorded_risk": contract["observed_risk"],
                 "observed_risk": actual_risk,
-                "expected_finding_types": expected_types,
+                "recorded_finding_types": recorded_types,
                 "observed_finding_types": actual_types,
                 "reasons": reasons,
             }
