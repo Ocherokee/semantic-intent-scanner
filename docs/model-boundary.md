@@ -129,4 +129,4 @@ pytest -m live_model
 
 An isolated CI job that runs them without exposing the credential to
 fork-PR code is future work, not part of this slice. They are integration
-coverage and calibration inputs, not evidence of a stable contract.
+coverage and regression observations, not evidence of a stable contract.
