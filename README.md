@@ -291,6 +291,14 @@ Security risk and operational status are separate. With `--judge`, incomplete
 semantic coverage is also separate from both: it is exposed through
 `judge_status`, `semantic_coverage`, and `analysis_complete`.
 
+This table covers only `scan` / `scan-remote` / `scan-mcp`. For the complete,
+verified command-by-command contract — every subcommand including
+`inventory`, `inventory-diff`, `trust-analyze`, and `audit`; required/optional
+arguments; network and model behavior per command; `ANTHROPIC_API_KEY`
+requirements; stdout/stderr and output shapes; exit codes including argparse's
+own exit 2; and known caveats such as `scan`'s uncaught-exception behavior
+with no API key — see [`docs/cli-contract.md`](docs/cli-contract.md).
+
 ---
 
 ## Architecture
