@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    name: Deterministic release gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]" pytest
+
+      # No ANTHROPIC_API_KEY is set or referenced anywhere in this workflow.
+      # `-m "not live_model"` deselects the eight model-backed tests; with no
+      # credential present they would skip themselves anyway (see
+      # docs/model-boundary.md), but this is the actual release gate: it must
+      # complete with zero skips and zero failures.
+      - name: Deterministic test suite (credential-free)
+        run: pytest -m "not live_model"
+
+      # Focused re-run of the schema/runtime parity tests: the four checked-in
+      # JSON Schemas (schemas/*.schema.json) against the Python contract
+      # validators, using the existing golden valid/invalid fixtures. This is
+      # a subset of the run above, made visible as its own named check rather
+      # than a second validation system.
+      - name: Schema-drift / contract parity check
+        run: pytest tests/test_contract_schema_parity.py
