@@ -11,9 +11,8 @@ from .invariants import INVARIANT_MAP
 from .remote_fetch import MAX_BODY_BYTES
 
 # Scanner version emitted in JSON output as "version". Kept in step with the
-# package version in pyproject.toml by hand for now; both land on "0.4.0" at
-# release (this is a dev build, so it must not claim to be the release).
-SCANNER_VERSION = "0.4.0.dev0"
+# package version in pyproject.toml by hand.
+SCANNER_VERSION = "1.0.0"
 
 # KiB form of the guarded-fetch body cap, for display in the remote report.
 _BODY_LIMIT_KB = MAX_BODY_BYTES // 1024
