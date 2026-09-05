@@ -297,13 +297,15 @@ No MCP client is started, no transport is opened, and no tool is invoked.
 | Code | Meaning |
 |------|---------|
 | 0 | Low risk — no blocking findings |
-| 1 | Medium risk — possible violations |
+| 1 | `scan`: medium risk or certain existing invalid-input cases; `scan-mcp`: also its existing missing-file case |
 | 2 | High or critical risk — likely violations |
-| 3 | `scan-remote` / `scan-mcp` only: nothing could be analyzed. **Not** a low-risk result. |
+| 3 | `scan`: model credentials missing when semantic evaluation would run; `scan-remote`: nothing analyzable; `scan-mcp`: invalid input or no tools. **Not** a low-risk result. |
 
-For `scan-remote`, exit 3 covers cases where every supported document failed,
-was blocked, or was not found. For `scan-mcp`, it covers malformed/unrecognized
-input (`invalid_input`) or a parsed file containing no tools (`no_tools`).
+For `scan`, missing model credentials use deliberate operational exit 3 only
+when semantic evaluation would run. For `scan-remote`, exit 3 covers cases where
+every supported document failed, was blocked, or was not found. For `scan-mcp`,
+it covers malformed/unrecognized input (`invalid_input`) or a parsed file
+containing no tools (`no_tools`); a missing file retains its existing exit 1.
 Security risk and operational status are separate. With `--judge`, incomplete
 semantic coverage is also separate from both: it is exposed through
 `judge_status`, `semantic_coverage`, and `analysis_complete`.
@@ -313,8 +315,9 @@ verified command-by-command contract — every subcommand including
 `inventory`, `inventory-diff`, `trust-analyze`, and `audit`; required/optional
 arguments; network and model behavior per command; `ANTHROPIC_API_KEY`
 requirements; stdout/stderr and output shapes; exit codes including argparse's
-own exit 2; and known caveats such as `scan`'s uncaught-exception behavior
-with no API key — see [`docs/cli-contract.md`](docs/cli-contract.md).
+own exit 2; and `scan`'s deliberate operational exit when semantic evaluation
+requires a missing credential — see
+[`docs/cli-contract.md`](docs/cli-contract.md).
 
 ---
 
