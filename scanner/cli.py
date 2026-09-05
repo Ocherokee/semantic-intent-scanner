@@ -22,6 +22,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -78,6 +79,17 @@ def _print_public_error(exc: BaseException) -> None:
     print(f"Error: {_public_error(exc)}", file=sys.stderr)
 
 
+def _has_api_key(args: argparse.Namespace) -> bool:
+    return bool(args.api_key or os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def _print_missing_api_key_error() -> None:
+    print(
+        "Error: Anthropic API key required; use --api-key or set ANTHROPIC_API_KEY",
+        file=sys.stderr,
+    )
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     path = Path(args.path)
 
@@ -105,6 +117,10 @@ def cmd_scan_file(path: Path, args: argparse.Namespace) -> int:
     if not skill_text.strip():
         print(f"Error: file is empty: {path}", file=sys.stderr)
         return 1
+
+    if not _has_api_key(args):
+        _print_missing_api_key_error()
+        return 3
 
     print(f"Scanning {path}...", file=sys.stderr)
 
@@ -149,6 +165,9 @@ def cmd_scan_directory(path: Path, args: argparse.Namespace) -> int:
             _print_public_error(exc)
             return 1
         if skill_text.strip():
+            if not _has_api_key(args):
+                _print_missing_api_key_error()
+                return 3
             semantic_results = evaluate_skill(skill_text, api_key=args.api_key)
 
     if args.json:

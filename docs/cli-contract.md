@@ -21,8 +21,8 @@ differed from actual behavior, that is called out explicitly (§8).
 
 | Command | Guarded remote fetch (HTTPS, SSRF-hardened) | Registry/DNS provenance lookups | Model API call | `ANTHROPIC_API_KEY` |
 | --- | --- | --- | --- | --- |
-| `scan <file>` | no | no | **always** (no deterministic mode) | **required** — absent key is an **uncaught exception**, not a handled error (§8.1) |
-| `scan <dir>` / `--dir` | no | no | only if a candidate instruction file is found (`SKILL.md`, `skill.md`, `Skill.md`, `README.md`, in that order) | required only in that case, same uncaught-exception risk |
+| `scan <file>` | no | no | **always** (no deterministic mode) | **required** — absent key is a handled operational failure (exit 3; §8.1) |
+| `scan <dir>` / `--dir` | no | no | only if a candidate instruction file is found (`SKILL.md`, `skill.md`, `Skill.md`, `README.md`, in that order) | required only in that case; absent key is a handled operational failure (exit 3) |
 | `scan-remote <url>` | yes — `llms.txt` / `llms-full.txt` | **yes, always** (packages/domains named in the fetched document) | opt-in, `--judge` only | irrelevant by default; needed for `--judge` to do anything (absent key → graceful `unavailable:no_api_key`, not a crash) |
 | `scan-mcp <file>` | no (reads a local file) | **yes, always** (packages/domains named in the captured tool text) | opt-in, `--judge` only | same as `scan-remote --judge` |
 | `inventory <url>` | yes — bounded, same-origin, depth ≤ 2 | no | no | irrelevant |
@@ -63,14 +63,15 @@ mode** — every file scan and every directory scan that finds a candidate
 instruction file calls the model. A directory with no candidate instruction
 file runs the deterministic directory audit only and makes no model call.
 
-**`ANTHROPIC_API_KEY`:** required whenever a model call happens. **Verified:**
-with no key and no `--api-key`, `scan <file>` raises an uncaught `TypeError`
-from the Anthropic SDK's header validation, prints a full Python traceback to
-stderr, and exits **1** — see §8.1. This is not a designed error path.
+**`ANTHROPIC_API_KEY`:** required whenever a model call happens. With no key
+and no `--api-key`, `scan <file>` and a directory scan that finds a non-empty
+candidate instruction file print a concise handled error to stderr, make no
+model call, and exit **3** — see §8.1.
 
 **stdout/stderr:** progress ("Scanning `<path>`...", or "Auditing directory
 `<path>`...") on stderr. The report itself (terminal or JSON) on stdout.
-Uncaught exceptions print their traceback to stderr.
+The missing-credential path prints only a concise error (plus directory
+discovery progress in directory mode), with no traceback or report.
 
 **Output form:** `--json` prints a legacy JSON report
 (`scanner: version: file: overall_risk: violation_count: violations:
@@ -85,17 +86,17 @@ chunks_evaluated: disclaimer:`); default is a colorized terminal report
 | 0 | risk `low` |
 | 1 | risk `medium`, **or** path not found, **or** not a file, **or** file empty, **or** input exceeds the 2 MiB local-artifact bound, **or** input is not UTF-8 |
 | 2 | risk `high` or `critical` |
-| — | **uncaught exception** (e.g. missing API key, API error) → whatever exit code the exception produces (verified: 1, via Python's default uncaught-exception handling) — **not** part of the 0/1/2 risk contract |
+| 3 | required API key is absent when semantic evaluation would run; handled operational failure, no model call |
 | 2 (argparse) | unknown command/flag/missing positional (`argparse` itself) |
 
 For directory mode, the worse of the directory-audit risk and the semantic
 risk (when computed) selects the code by the same 0/1/2 mapping.
 
-**Operational failure:** `scan` has no distinct operational-failure exit; a
-non-model invalid-input case (missing path, empty file) and a genuine
-`medium` risk finding are **not distinguishable by exit code alone** — both
-return 1. This is existing, unchanged behavior (see also
-`docs/v1.0-release-readiness.md`).
+**Operational failure:** missing model credentials use exit 3, matching the
+existing operational-failure convention used elsewhere. Other existing
+invalid-input cases remain exit 1, so they are still not distinguishable from
+a genuine `medium` risk finding by exit code alone. The global exit-code
+system is otherwise unchanged (see also `docs/v1.0-release-readiness.md`).
 
 **Bounded/fail-closed:** file reads are capped at
 `MAX_LOCAL_ARTIFACT_BYTES` (2 MiB; `scanner/resource_limits.py`); exceeding it
@@ -106,9 +107,9 @@ truncated to 240 characters.
 detection) is deterministic. Semantic evaluation is entirely model-backed;
 there is no offline equivalent for a single instruction file.
 
-**Caveats:** run `scan` only with a credential available (env var or
-`--api-key`) unless scanning a directory you know has no candidate
-instruction file — otherwise expect a traceback, not a clean error.
+**Caveats:** a credential is still required for semantic evaluation. Missing
+credentials are rejected at the CLI boundary before constructing a model
+client; other model/API failures retain their existing behavior.
 
 ---
 
@@ -368,11 +369,11 @@ selections of the same analyzer are numbered `directory:2`, `remote:3`, etc.
 (`--skill`, always model-backed). `--directory` and `--trust-inventory` are
 always local-only.
 
-**`ANTHROPIC_API_KEY`:** required for `--skill` — but unlike bare `scan`,
-**this is caught**: a model failure (including a missing key) here is a
+**`ANTHROPIC_API_KEY`:** required for `--skill`. A model failure (including a
+missing key) here is a
 handled `Exception` turned into `AdapterOutcome("failed_operational", ...)`
-(verified in `scanner/composite_audit.py::semantic_adapter`), not an uncaught
-traceback (§8.1). Optional for `--judge` on `--remote`/`--mcp`.
+(verified in `scanner/composite_audit.py::semantic_adapter`). Optional for
+`--judge` on `--remote`/`--mcp`.
 
 **stdout/stderr:** invocation errors (no analyzer selected, `--judge` without
 `--remote`/`--mcp`, `--server-label` without `--mcp`) on stderr, exit 3
@@ -424,44 +425,41 @@ are deterministic by default and model-backed only with `--judge`.
 | 0 | low risk | low risk | low risk | valid artifact | valid comparison | valid analysis | no analyzer failed |
 | 1 | medium risk **or** several invalid-input cases | medium risk | medium risk | — | — | — | — |
 | 2 | high/critical risk | high/critical risk | high/critical risk | — | — | — | — |
-| 3 | — | nothing analyzable | invalid input / no tools | `InventoryError` | read/JSON/comparison failure | read/JSON/analysis failure | ≥1 analyzer `failed_*`, or a pre-execution invocation error |
+| 3 | missing model credentials | nothing analyzable | invalid input / no tools | `InventoryError` | read/JSON/comparison failure | read/JSON/analysis failure | ≥1 analyzer `failed_*`, or a pre-execution invocation error |
 | 1 (special) | — | — | **missing file** (own explicit check, not the shared exit-3 path) | — | — | — | — |
 | 2 (argparse) | every command: unknown subcommand, unknown flag, or missing required positional |
-| uncaught | `scan` and `scan --dir` with a candidate instruction file: missing/invalid API key or other Anthropic SDK failure is **not caught** | | | | | | |
 
 ---
 
 ## Known caveats verified in this slice
 
-### 8.1 `scan`'s missing-key crash vs. the judge's graceful handling
+### 8.1 `scan` missing-key handling
 
-Reproduced against this commit: `ANTHROPIC_API_KEY` unset, no `--api-key`,
-`semantic-intent scan tests/fixtures/benign/git-status.md` →
+With `ANTHROPIC_API_KEY` unset and no `--api-key`,
+`semantic-intent scan tests/fixtures/benign/git-status.md` reports:
 
 ```
-Scanning tests/fixtures/benign/git-status.md...
-Traceback (most recent call last):
-  ...
-TypeError: "Could not resolve authentication method. Expected one of api_key, ..."
+Error: Anthropic API key required; use --api-key or set ANTHROPIC_API_KEY
 ```
 
-exit code **1** (Python's default uncaught-exception exit), not a clean
-"Error: ..." message and not one of the documented 0/1/2 risk codes. This
-happens because `cmd_scan_file` / `cmd_scan_directory` call `evaluate_skill`
-with no `try/except` around it, and `evaluate_skill` constructs
-`anthropic.Anthropic()` unconditionally.
+and exits **3**. `cmd_scan_file` and `cmd_scan_directory` check for an explicit
+key or `ANTHROPIC_API_KEY` immediately before calling `evaluate_skill`, so the
+predictable credential-absence case never constructs an Anthropic client.
+Directory scans without a candidate instruction file remain deterministic and
+need no credential.
 
-By contrast, `scanner/remote_judge.py::judge_document` explicitly checks for
-a key *before* constructing a client and returns
+`scanner/remote_judge.py::judge_document` likewise checks for a key before
+constructing a client and returns
 `JudgeResult(status="unavailable:no_api_key", ...)` — no exception, no
 traceback — and `scanner/composite_audit.py::semantic_adapter` wraps the
 same `evaluate_skill` call in a `try/except Exception` that turns any
 failure (including a missing key) into `AdapterOutcome("failed_operational",
 ...)`.
 
-**Net effect: the same missing-key condition is a clean, documented failure
-in `--judge` and in `audit --skill`, and an undocumented crash in bare
-`scan`.** This is existing behavior; it is not changed here.
+This check is intentionally narrow: unrelated evaluator, SDK, and API errors
+are not broadly swallowed or reclassified. Detector/model prompts, model
+selection, thresholds, verdict logic, risk mapping, schemas, and report
+semantics are unchanged.
 
 ### 8.2 `scan-mcp`'s missing-file exit code
 
