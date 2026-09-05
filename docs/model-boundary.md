@@ -1,10 +1,11 @@
 # Deterministic vs model-backed behaviour
 
-*Status: v0.11 stabilization. Interfaces described here are candidates for the
-1.0 stable promise; the model-backed lanes are explicitly **not**.*
+*Status: 1.0 contract boundary. The documented deterministic interfaces and
+contracts are the stable 1.0 promise; model-backed lanes remain explicitly
+probabilistic and experimental.*
 
-The scanner has two kinds of behaviour and this document draws the line
-between them so a release consumer knows exactly what is being promised.
+The scanner has two kinds of behaviour and this document defines the 1.0
+boundary so a release consumer knows exactly what is, and is not, stable.
 
 ## 1. Deterministic behaviour — the release gate
 

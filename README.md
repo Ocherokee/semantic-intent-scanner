@@ -461,17 +461,17 @@ reach it.
   - deterministic resource bounds
   - structural-locator and public-failure hardening
   - credential-free deterministic release gate verified locally
-- [ ] v0.11 — Release stabilization
+- [x] v0.11 — Release stabilization
   - empirical/regression measurement without unjustified threshold tuning
   - explicit deterministic/model-backed boundary
   - CI and schema-drift gates
   - build, wheel, and clean-install verification
   - complete CLI and network-contract documentation
-- [ ] v1.0 — Stable release contract
-  - release-only versioning
-  - release notes and artifacts
-  - clean-install verification
-  - disclosure-route and repository-protection verification
+- [x] v1.0 — Stable deterministic-interface release
+  - documented deterministic interfaces and contracts frozen for 1.0
+  - package and report version set to 1.0.0
+  - model-backed paths remain probabilistic and experimental
+  - release artifacts and human repository checks remain pre-tag work
 
 The v0.5 contract is independently versioned from the scanner package and
 legacy report envelopes. It defines canonical observation, rationale,
@@ -502,10 +502,11 @@ deduplication, or new analyzer authority. See
 [`docs/v0.9-composite-audit.md`](docs/v0.9-composite-audit.md).
 
 The current fixtures are useful regression material, but they are not an
-independent empirical calibration corpus and do not yet justify changing risk
-thresholds. v0.11 should measure deterministic behavior honestly, retain
-material misses and false positives as regressions, and make the model-backed
-boundary explicit before any threshold change is considered.
+independent empirical calibration corpus and do not justify claims about
+detector efficacy or changing risk thresholds. Version 1.0 stabilizes the
+documented deterministic interfaces and contracts; it does not turn this
+research prototype into certified safety tooling. A clean result does not
+certify safety, and model-backed paths remain probabilistic and experimental.
 
 Post-1.0 research may explore relational integrity monitoring across
 conversational trajectories. That work is not assigned to v0.11 or to another
