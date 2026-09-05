@@ -28,7 +28,7 @@ differed from actual behavior, that is called out explicitly (§8).
 | `inventory <url>` | yes — bounded, same-origin, depth ≤ 2 | no | no | irrelevant |
 | `inventory-diff <a> <b>` | no | no | no | irrelevant |
 | `trust-analyze <inventory>` | no | no | no | irrelevant |
-| `audit` | only if `--remote`/`--mcp` selected (same as `scan-remote`/`scan-mcp`) | only if `--remote`/`--mcp` selected | `--skill` always; `--remote`/`--mcp` opt-in via `--judge` | required for `--skill` (**caught gracefully here**, unlike bare `scan` — §8.1); optional for `--judge` |
+| `audit` | only for selected `--remote` inputs (same as `scan-remote`); `--mcp` consumes a local captured file and does **not** perform guarded document fetching | only if `--remote`/`--mcp` selected (`--mcp` may still perform registry/DNS lookups on names in the captured file, same as `scan-mcp`) | `--skill` always; `--remote`/`--mcp` opt-in via `--judge` | required for `--skill` (**caught gracefully here**, unlike bare `scan` — §8.1); optional for `--judge` |
 
 "Registry/DNS provenance lookups" is a distinct, narrower network surface from
 "guarded remote fetch": it is live HTTP `GET` to two fixed hosts
@@ -424,7 +424,7 @@ are deterministic by default and model-backed only with `--judge`.
 | 0 | low risk | low risk | low risk | valid artifact | valid comparison | valid analysis | no analyzer failed |
 | 1 | medium risk **or** several invalid-input cases | medium risk | medium risk | — | — | — | — |
 | 2 | high/critical risk | high/critical risk | high/critical risk | — | — | — | — |
-| 3 | — | nothing analyzable | nothing analyzable, **or** missing input via `_read_bounded_text` paths | `InventoryError` | read/JSON/comparison failure | read/JSON/analysis failure | ≥1 analyzer `failed_*`, or a pre-execution invocation error |
+| 3 | — | nothing analyzable | invalid input / no tools | `InventoryError` | read/JSON/comparison failure | read/JSON/analysis failure | ≥1 analyzer `failed_*`, or a pre-execution invocation error |
 | 1 (special) | — | — | **missing file** (own explicit check, not the shared exit-3 path) | — | — | — | — |
 | 2 (argparse) | every command: unknown subcommand, unknown flag, or missing required positional |
 | uncaught | `scan` and `scan --dir` with a candidate instruction file: missing/invalid API key or other Anthropic SDK failure is **not caught** | | | | | | |
@@ -479,7 +479,7 @@ empirically for both.
   standalone `scan-remote`/`scan-mcp` commands**, but does **not** carry over
   unchanged into `audit`: there, the identical "nothing served / no tools"
   condition is `not_applicable`, not a failure, and does not produce exit 3
-  (§7 in this document; verified in `scanner/composite_audit.py::_remote_outcome`).
+  (§8 in this document; verified in `scanner/composite_audit.py::_remote_outcome`).
 - "argparse itself may use exit 2" is correct and reproduced for every
   subcommand (unknown subcommand name verified explicitly; the parser
   structure is identical for unknown flags and missing positionals).
