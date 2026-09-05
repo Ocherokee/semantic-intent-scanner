@@ -111,15 +111,32 @@ A clean scan does not certify safety. Human review remains essential.
 
 The scanner now answers several questions, not one.
 
-**v0.1 asked:** Is this instruction dangerous?  
-**v0.2 adds:** Which ethical mechanism failed, and why did that failure create executable risk?  
-**v0.3 adds:** Are there attack surfaces in this skill package beyond the instruction file?  
-**v0.4 adds:** Is external semantic content being allowed to direct behavior or extend trust without a trust decision — including remote documents and MCP tool metadata?
-**v0.5 adds:** Can findings be exchanged and retested without coupling them to one scanner implementation?
-**v0.6 adds:** What agent-readable surfaces does a site expose, how were they discovered, and what do they declare?
-**v0.7 adds:** What factual surface state changed between two validated inventory artifacts?
-**v0.8 adds:** Which explicitly supported declarations delegate action or capability authority across an origin boundary?
-**v0.9 adds:** Can independently usable analyzers emit one deterministic canonical finding stream without changing their semantics?
+**v0.1 — Instruction intent**  
+Is this instruction dangerous?
+
+**v0.2 — Ethical mechanism**  
+Which ethical mechanism failed, and why did that failure create executable risk?
+
+**v0.3 — Package attack surface**  
+Are there attack surfaces in this skill package beyond the instruction file?
+
+**v0.4 — External semantic trust**  
+Is external semantic content being allowed to direct behavior or extend trust without a trust decision, including remote documents and MCP tool metadata?
+
+**v0.5 — Finding portability**  
+Can findings be exchanged and retested without coupling them to one scanner implementation?
+
+**v0.6 — Surface inventory**  
+What agent-readable surfaces does a site expose, how were they discovered, and what do they declare?
+
+**v0.7 — Change detection**  
+What factual surface state changed between two validated inventory artifacts?
+
+**v0.8 — Authority boundaries**  
+Which explicitly supported declarations delegate action or capability authority across an origin boundary?
+
+**v0.9 — Composite analysis**  
+Can independently usable analyzers emit one deterministic canonical finding stream without changing their semantics?
 
 ---
 
