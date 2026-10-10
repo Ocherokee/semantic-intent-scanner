@@ -17,12 +17,43 @@ MAX_NODES = 15000
 MAX_LIFECYCLE_BYTES = 128 * 1024
 
 _TIME = re.compile(r"\b(datetime|date|time|timestamp|utcnow|now|today|strftime|strptime|sleep|setTimeout|setInterval)\b", re.I)
-_ANTI = re.compile(r"\b(debugger|is_debugger|ptrace|sys\.gettrace|virtualbox|vmware|sandbox|analysis_tool|security_process|antivirus)\b", re.I)
-_CREDENTIAL = re.compile(r"\b(credential|secret|token|password|api_key|access_key|private_key|\.aws|\.ssh)\b", re.I)
+_ANTI = re.compile(r"\b(debugger|debugger_present|is_debugger|ptrace|sys\.gettrace|virtualbox|vmware|sandbox|analysis_tool|security_process|antivirus)\b", re.I)
+_CREDENTIAL = re.compile(r"(?<![^\W_])credentials?(?![^\W_])|\b(secret|token|password|api_key|access_key|private_key|\.aws|\.ssh)\b", re.I)
 _OUTBOUND = re.compile(r"\b(requests\.post|httpx\.post|urllib\.request|fetch\s*\(|axios\.post|send|transmit|upload)\b", re.I)
 _PROCESS = re.compile(r"\b(subprocess|Popen|os\.system|child_process|spawn\s*\(|exec\s*\(|detached)\b", re.I)
 _DYNAMIC = re.compile(r"\b(eval|exec|compile|__import__|importlib|Function)\s*\(", re.I)
-_JS_CONDITION = re.compile(r"\bif\s*\((?P<cond>[^)]{1,300})\)\s*\{", re.I)
+_JS_CONDITION = re.compile(r"\bif\s*\(", re.I)
+
+def _javascript_conditions(source: str):
+    """Extract braced if conditions with at most 300 condition characters."""
+    for match in _JS_CONDITION.finditer(source):
+        start = match.end()
+        depth = 1
+        quote = None
+        escaped = False
+        for index in range(start, min(len(source), start + 301)):
+            char = source[index]
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+                continue
+            if char in ("'", '"', "`"):
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    body_start = index + 1
+                    while body_start < len(source) and source[body_start].isspace():
+                        body_start += 1
+                    if index > start and body_start < len(source) and source[body_start] == "{":
+                        yield source[start:index], body_start + 1, match.start()
+                    break
 
 @dataclass(frozen=True)
 class Observation:
@@ -105,10 +136,10 @@ def inspect_javascript(source: str) -> list[Observation]:
     if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ValueError("source too large")
     findings = []
-    for m in _JS_CONDITION.finditer(source):
+    for condition, body_start, condition_start in _javascript_conditions(source):
         # Bounded snippet is intentionally not represented as a full reachable call graph.
-        body = source[m.end():m.end()+1200].split("}", 1)[0]
-        findings.extend(_describe(m.group("cond"), body, source.count("\n", 0, m.start())+1))
+        body = source[body_start:body_start+1200].split("}", 1)[0]
+        findings.extend(_describe(condition, body, source.count("\n", 0, condition_start)+1))
     if _DYNAMIC.search(source):
         findings.append(Observation("CE-UNRESOLVED", "incomplete", 0,
                                     "dynamic JavaScript execution not statically resolved"))
