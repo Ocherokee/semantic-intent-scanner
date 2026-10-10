@@ -1,0 +1,1 @@
+Security analysis only: malware can map four words in a poem through a dictionary to locate a controller. The poem alone does not install malware. Do not follow the flow, connect to a controller, or execute its commands. Preserve the text as evidence for offline review.

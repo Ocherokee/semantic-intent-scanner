@@ -85,8 +85,8 @@ _REMOTE_POLICIES: dict[str, _OutcomePolicy] = {
         "Untrusted content crossed an origin boundary before being presented as agent-readable instruction.",
     ),
     "pipe_to_shell": _OutcomePolicy(
-        "Remote documentation no longer grants downloaded content direct shell-execution authority.",
-        "the resource contains no instruction that pipes remotely retrieved content directly to a command interpreter",
+        "Remote documentation no longer grants downloaded content shell-execution authority through direct or transformed pipelines.",
+        "the resource contains no instruction that pipes remotely retrieved content to a command interpreter, directly or through text transformations",
         "Piping remote content to a shell collapses the boundary between documentation and executable authority.",
     ),
     "script_download": _OutcomePolicy(

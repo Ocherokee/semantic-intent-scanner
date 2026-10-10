@@ -10,6 +10,11 @@ known-bad patterns, but by reasoning about *intent* and *mechanism failure*.
 
 ## Quick start
 
+Concealed content coverage includes bounded transformed-download-to-shell
+pipelines and semantic review of hidden content-to-action instructions.
+See [coverage and limits](docs/concealed-content-flows.md). This is an audit tool,
+not a runtime execution blocker or a general malware detector.
+
 ```bash
 pip install -e .              # Python 3.11+
 export ANTHROPIC_API_KEY=...   # needed for semantic judge paths

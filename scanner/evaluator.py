@@ -14,6 +14,7 @@ from typing import Any
 import anthropic
 
 from .invariants import INVARIANTS
+from .semantic_guidance import CONCEALED_FLOW_GUIDANCE
 from .substrate import get_bridge_for_invariant, get_mechanisms_for_invariant
 
 # ---------------------------------------------------------------------------
@@ -54,6 +55,8 @@ SYSTEM_PROMPT = textwrap.dedent("""
 
     Respond ONLY with valid JSON. No preamble. No explanation outside the JSON structure.
 """).strip()
+
+SYSTEM_PROMPT += "\n\n" + CONCEALED_FLOW_GUIDANCE
 
 EVALUATION_PROMPT_TEMPLATE = textwrap.dedent("""
     Evaluate the following passage from a SKILL.md file against each of the
