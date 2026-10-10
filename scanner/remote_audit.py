@@ -47,6 +47,7 @@ Nothing here fetches, executes, or installs anything.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import asdict, dataclass, field
 from urllib.parse import urlparse
 
@@ -169,8 +170,84 @@ _VALUE_FLAGS = {
 }
 
 
+def _transformed_download_pipelines(text: str) -> list[InstallCommand]:
+    """Recognize a bounded literal pipeline, never decode or execute its data.
+
+    Deliberately not a shell interpreter: no substitutions, redirections,
+    continuations or command lists. Quoted arguments retain their quotes so a
+    literal '|' cannot become a pipeline operator. Unsupported syntax remains
+    for semantic review rather than being guessed into a dataflow finding.
+    """
+    commands = []
+    for line in text.splitlines():
+        # A plain/fenced command line or the inside of an inline code span.
+        candidates = line.split('`')[1::2] if '`' in line else [line]
+        for candidate in candidates:
+            raw = candidate.strip()
+            if len(raw) > 8192 or not re.match(r"^(?:curl|wget)\s", raw):
+                continue
+            if "$" in raw or "\\" in raw:
+                continue
+            try:
+                lexer = shlex.shlex(raw, posix=False, punctuation_chars="|;&<>()")
+                lexer.whitespace_split = True
+                lexer.commenters = ""
+                tokens = list(lexer)
+            except ValueError:
+                continue
+            stages = [[]]
+            for token in tokens:
+                if token == "|":
+                    stages.append([])
+                elif token and all(ch in "|;&<>()" for ch in token):
+                    break
+                else:
+                    stages[-1].append(token)
+            else:
+                if not 3 <= len(stages) <= 6 or not all(stages):
+                    continue
+                fetch = stages[0]
+                if not any(arg.strip("\"'").startswith(("https://", "http://"))
+                           for arg in fetch[1:]):
+                    continue
+                # Do not assert a downloaded-data link when the fetch writes
+                # to a file. Keep this new grammar narrower than a shell.
+                if fetch[0] == "curl":
+                    if any(not (arg.strip("\"'").startswith(("https://", "http://"))
+                                or re.fullmatch(r"-[fsSL]+", arg)
+                                or arg in {"--fail", "--silent", "--show-error", "--location"})
+                           for arg in fetch[1:]):
+                        continue
+                else:
+                    args = fetch[1:]
+                    if args[:1] in (["-qO-"], ["-O-"]):
+                        args = args[1:]
+                    elif args[:2] == ["-O", "-"]:
+                        args = args[2:]
+                    else:
+                        continue
+                    if not args or any(not arg.strip("\"'").startswith(("https://", "http://"))
+                                       for arg in args):
+                        continue
+                transforms = stages[1:-1]
+                if any(stage[0] not in {"base64", "sed", "awk", "tr", "cut"}
+                       for stage in transforms):
+                    continue
+                shell = stages[-1]
+                if shell[0] == "sudo":
+                    shell = shell[1:]
+                # A shell invoked with -c or a filename doesn't consume stdin
+                # as a script. Only recognize the explicit stdin forms here.
+                if not shell or shell[0] not in {"sh", "bash", "zsh"}:
+                    continue
+                if any(arg not in {"-s", "--"} for arg in shell[1:]):
+                    continue
+                commands.append(InstallCommand(raw, stages[0][0], None, None, "pipe_to_shell"))
+    return commands
+
+
 def extract_install_commands(text: str) -> list[InstallCommand]:
-    cmds: list[InstallCommand] = []
+    cmds: list[InstallCommand] = _transformed_download_pipelines(text)
 
     for m in _PIPE_TO_SHELL_RE.finditer(text):
         cmds.append(InstallCommand(m.group(0).strip(), m.group("fetch").lower(), None, None, "pipe_to_shell"))
@@ -346,7 +423,7 @@ def _analyze_command(cmd: InstallCommand, registry: RegistryClient, doc: RemoteD
 
     if cmd.kind == "pipe_to_shell":
         return [Finding("I5", "pipe_to_shell", "high",
-                        "the document tells the agent to pipe a downloaded script straight into a shell",
+                        "the document contains a pipeline from downloaded content into a shell, directly or through text transformations",
                         cmd.raw, analysis_method="rule_based", observed_at=doc.fetched_at, detail=detail)]
     if cmd.kind == "script_download":
         return [Finding("I5", "script_download", "medium",

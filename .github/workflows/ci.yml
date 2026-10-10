@@ -30,7 +30,7 @@ jobs:
           python -m pip install -e ".[test]" pytest
 
       # No ANTHROPIC_API_KEY is set or referenced anywhere in this workflow.
-      # `-m "not live_model"` deselects the eight model-backed tests; with no
+      # `-m "not live_model"` deselects the model-backed tests; with no
       # credential present they would skip themselves anyway (see
       # docs/model-boundary.md), but this is the actual release gate: it must
       # complete with zero skips and zero failures.

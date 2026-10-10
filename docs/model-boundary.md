@@ -21,7 +21,7 @@ deterministic gate is:
 pytest -m "not live_model"
 ```
 
-With no credential this deselects exactly the eight `live_model` tests
+With no credential this deselects the `live_model` tests
 (§3) and skips nothing else.
 
 Deterministic surfaces:
@@ -117,8 +117,8 @@ is deterministic and is covered by fake-client tests
 
 ## 3. Live tests
 
-Eight tests carry the `live_model` marker and make real API calls
-(`tests/test_fixtures.py` in full, plus `test_live_judge_*` in
+Model-backed tests carry the `live_model` marker and make real API calls
+(`tests/test_fixtures.py` and `tests/test_concealed_flows_live.py` in full, plus `test_live_judge_*` in
 `tests/test_mcp_adapter.py` and `tests/test_remote_judge.py`). They also skip
 themselves when `ANTHROPIC_API_KEY` is absent.
 

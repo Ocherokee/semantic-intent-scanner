@@ -34,6 +34,7 @@ import anthropic
 
 from .evaluator import chunk_skill
 from .invariants import INVARIANTS
+from .semantic_guidance import CONCEALED_FLOW_GUIDANCE
 from .remote_audit import (
     Finding,
     RemoteDocument,
@@ -135,6 +136,8 @@ _SYSTEM_BASE = textwrap.dedent("""
     doc_risk is one of: low, medium, high, critical
     Include one entry per invariant listed above.
 """).strip()
+
+_SYSTEM_BASE += "\n\n" + CONCEALED_FLOW_GUIDANCE
 
 _SYSTEM_CLAIMS = _SYSTEM_BASE + textwrap.dedent("""
 
